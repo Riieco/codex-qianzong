@@ -9,6 +9,7 @@ use chrono::Local;
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 use std::{
+    collections::HashSet,
     fs,
     path::{Path, PathBuf},
 };
@@ -19,6 +20,7 @@ pub const LEGACY_RELAY_PROVIDER_ID: &str = "qianzong_relay";
 const OFFICIAL_MODEL: &str = "gpt-5.5";
 const DEFAULT_BACKUP_ID: &str = "default-initial";
 const DEFAULT_BACKUP_LABEL: &str = "首次启动默认配置";
+const REPAIRABLE_DUPLICATE_TABLES: &[&str] = &["desktop.appearanceDarkChromeTheme"];
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -368,11 +370,61 @@ fn read_optional_text(path: &Path) -> AppResult<String> {
 
 fn parse_config(text: &str) -> AppResult<DocumentMut> {
     if text.trim().is_empty() {
-        Ok(DocumentMut::new())
-    } else {
-        text.parse::<DocumentMut>()
-            .map_err(|err| AppError::Config(format!("Codex 配置解析失败: {err}")))
+        return Ok(DocumentMut::new());
     }
+
+    match text.parse::<DocumentMut>() {
+        Ok(doc) => Ok(doc),
+        Err(original_error) => {
+            let repairable = is_repairable_duplicate_error(&original_error.to_string());
+            repairable
+                .then(|| repair_known_duplicate_tables(text))
+                .flatten()
+                .and_then(|repaired| repaired.parse::<DocumentMut>().ok())
+                .ok_or_else(|| AppError::Config(format!("Codex 配置解析失败: {original_error}")))
+        }
+    }
+}
+
+fn is_repairable_duplicate_error(message: &str) -> bool {
+    message.contains("duplicate key")
+        && REPAIRABLE_DUPLICATE_TABLES
+            .iter()
+            .any(|table| message.contains(table))
+}
+
+fn repair_known_duplicate_tables(text: &str) -> Option<String> {
+    let mut seen = HashSet::new();
+    let mut repaired = false;
+    let mut output = String::with_capacity(text.len());
+
+    for line in text.split_inclusive('\n') {
+        if let Some(table) = repairable_table_header(line) {
+            if !seen.insert(table) {
+                repaired = true;
+                continue;
+            }
+        }
+        output.push_str(line);
+    }
+
+    repaired.then_some(output)
+}
+
+fn repairable_table_header(line: &str) -> Option<&'static str> {
+    let code = line.split('#').next()?.trim();
+    if code.starts_with("[[") || !code.starts_with('[') || !code.ends_with(']') {
+        return None;
+    }
+    let normalized = code[1..code.len() - 1]
+        .split('.')
+        .map(str::trim)
+        .collect::<Vec<_>>()
+        .join(".");
+    REPAIRABLE_DUPLICATE_TABLES
+        .iter()
+        .copied()
+        .find(|known| *known == normalized)
 }
 
 fn ensure_restore_snapshot(
@@ -770,6 +822,62 @@ mod tests {
             &MemoryAuthVault::default(),
             None,
         )
+    }
+
+    #[test]
+    fn sync_repairs_duplicate_desktop_theme_table_and_keeps_its_content() {
+        let temp = tempfile::tempdir().unwrap();
+        let config_path = temp.path().join("config.toml");
+        let auth_path = temp.path().join("auth.json");
+        let restore_path = temp.path().join("restore.toml");
+        fs::write(
+            &config_path,
+            r#"model = "gpt-5.5"
+
+[desktop.appearanceDarkChromeTheme]
+enabled = true
+
+[ desktop.appearanceDarkChromeTheme ] # duplicate written by Codex desktop
+contrast = "high"
+"#,
+        )
+        .unwrap();
+
+        sync_test(
+            &AppSettings::default(),
+            &config_path,
+            &auth_path,
+            &restore_path,
+        )
+        .unwrap();
+
+        let text = fs::read_to_string(&config_path).unwrap();
+        assert_eq!(
+            text.matches("[desktop.appearanceDarkChromeTheme]").count(),
+            1
+        );
+        assert!(text.contains("enabled = true"));
+        assert!(text.contains(r#"contrast = "high""#));
+        assert!(temp.path().read_dir().unwrap().any(|entry| entry
+            .unwrap()
+            .file_name()
+            .to_string_lossy()
+            .starts_with("config.toml.qianzong-backup-")));
+    }
+
+    #[test]
+    fn parse_config_keeps_unknown_duplicate_table_errors_strict() {
+        let error = parse_config(
+            r#"[unknown.table]
+first = true
+
+[unknown.table]
+second = true
+"#,
+        )
+        .unwrap_err();
+
+        assert!(error.to_string().contains("duplicate key"));
     }
 
     #[test]
