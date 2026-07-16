@@ -5,10 +5,10 @@ describe("formatError", () => {
     expect(
       formatError({
         code: "config_error",
-        message: "配置错误: 未找到已保存的官方登录凭据",
+        message: "配置错误: API 地址已变化",
         detail: "Config(...) ",
       }),
-    ).toBe("配置错误: 未找到已保存的官方登录凭据");
+    ).toBe("配置错误: API 地址已变化");
   });
 
   it("keeps native and string errors readable", () => {

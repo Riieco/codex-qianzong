@@ -169,14 +169,14 @@ describe("SettingsDrawer", () => {
   it("shows the message from a structured Tauri save error", async () => {
     const onSave = vi.fn().mockRejectedValue({
       code: "config_error",
-      message: "配置错误: 未找到已保存的官方登录凭据",
+      message: "配置错误: API 地址已变化",
       detail: "Config(...) ",
     });
     render(<SettingsDrawer settings={defaultSettings} onClose={() => {}} onSave={onSave} />);
 
     fireEvent.click(screen.getByRole("button", { name: "保存设置" }));
 
-    expect(await screen.findByText("配置错误: 未找到已保存的官方登录凭据")).toBeInTheDocument();
+    expect(await screen.findByText("配置错误: API 地址已变化")).toBeInTheDocument();
     expect(screen.queryByText("[object Object]")).not.toBeInTheDocument();
   });
 });

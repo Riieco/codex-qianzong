@@ -112,7 +112,7 @@ fn sync_codex_config_for_paths(
         }
         CodexAccessMode::Official => {
             let mut doc = parse_config(&original)?;
-            apply_official_config(&mut doc, settings);
+            apply_official_config(&mut doc, settings, !next_auth.is_empty());
             doc.to_string()
         }
     };
@@ -397,11 +397,19 @@ fn write_codex_auth_if_changed(
 ) -> AppResult<()> {
     let next_text = serde_json::to_string_pretty(&Value::Object(auth.clone()))?;
     if next_text != original.trim() {
-        backup_existing_file(auth_path, "auth.json")?;
+        backup_existing_auth_file(auth_path, original)?;
         write_config(auth_path, &format!("{next_text}\n"))?;
     }
 
     Ok(())
+}
+
+fn backup_existing_auth_file(path: &Path, original: &str) -> AppResult<()> {
+    let auth = parse_auth_json(original)?;
+    if auth.get("auth_mode").and_then(Value::as_str) == Some("apikey") {
+        return Ok(());
+    }
+    backup_existing_file(path, "auth.json")
 }
 
 fn prepare_codex_auth(
@@ -417,6 +425,23 @@ fn prepare_codex_auth(
     if data.official_auth_map().is_none() {
         if let Some(fallback) = official_auth_fallback {
             vault_changed |= data.capture_official_auth(fallback);
+        }
+    }
+    if let (Some(endpoint), Some(api_key)) = (
+        managed_relay_endpoint(current_config),
+        current
+            .get("OPENAI_API_KEY")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|value| !value.is_empty()),
+    ) {
+        let current_relay = RelayCredential {
+            endpoint,
+            api_key: api_key.to_string(),
+        };
+        if data.relay.as_ref() != Some(&current_relay) {
+            data.relay = Some(current_relay);
+            vault_changed = true;
         }
     }
 
@@ -471,27 +496,21 @@ fn prepare_codex_auth(
             ])
         }
         CodexAccessMode::Official => {
-            let mut official = data.official_auth_map().or_else(|| {
+            let official = data.official_auth_map().or_else(|| {
                 current
                     .get("auth_mode")
                     .and_then(Value::as_str)
                     .filter(|mode| *mode == "chatgpt")
                     .map(|_| current.clone())
             });
-            if official.is_none()
-                && current.get("auth_mode").and_then(Value::as_str) == Some("apikey")
-            {
-                return Err(AppError::Config(
-                    "未找到已保存的官方登录凭据，请先在 Codex 中完成官方登录".into(),
-                ));
-            }
-            let mut official = official.take().unwrap_or_default();
-            official.insert(
-                "auth_mode".to_string(),
-                Value::String("chatgpt".to_string()),
-            );
-            official.insert("OPENAI_API_KEY".to_string(), Value::Null);
-            official
+            official.map_or_else(Map::new, |mut auth| {
+                auth.insert(
+                    "auth_mode".to_string(),
+                    Value::String("chatgpt".to_string()),
+                );
+                auth.insert("OPENAI_API_KEY".to_string(), Value::Null);
+                auth
+            })
         }
     };
 
@@ -612,7 +631,7 @@ fn apply_relay_config(doc: &mut DocumentMut, settings: &AppSettings) -> AppResul
     Ok(())
 }
 
-fn apply_official_config(doc: &mut DocumentMut, settings: &AppSettings) {
+fn apply_official_config(doc: &mut DocumentMut, settings: &AppSettings, has_official_auth: bool) {
     let root = doc.as_table_mut();
     root.remove("openai_base_url");
     root.remove("service_tier");
@@ -620,7 +639,7 @@ fn apply_official_config(doc: &mut DocumentMut, settings: &AppSettings) {
     root.insert("model_reasoning_effort", value("medium"));
     root.insert("preferred_auth_method", value("chatgpt"));
 
-    if settings.unify_codex_session_history {
+    if settings.unify_codex_session_history && has_official_auth {
         root.insert("model_provider", value(SHARED_PROVIDER_ID));
         if !matches!(root.get("model_providers"), Some(Item::Table(_))) {
             root.insert("model_providers", Item::Table(Table::new()));
@@ -637,7 +656,7 @@ fn apply_official_config(doc: &mut DocumentMut, settings: &AppSettings) {
         official.insert("wire_api", value("responses"));
         providers.insert(SHARED_PROVIDER_ID, Item::Table(official));
     } else {
-        root.remove("model_provider");
+        root.insert("model_provider", value("openai"));
         let providers_empty = root
             .get_mut("model_providers")
             .and_then(Item::as_table_mut)
@@ -907,6 +926,76 @@ service_tier = "priority"
         assert!(!text.contains("service_tier"));
         let auth = fs::read_to_string(&auth_path).unwrap();
         assert!(auth.contains(r#""auth_mode": "chatgpt""#));
+    }
+
+    #[test]
+    fn official_sync_without_saved_login_returns_to_login_ready_state() {
+        let temp = tempfile::tempdir().unwrap();
+        let config_path = temp.path().join("config.toml");
+        let auth_path = temp.path().join("auth.json");
+        let restore_path = temp.path().join("restore.toml");
+        fs::write(
+            &config_path,
+            r#"model_provider = "qianzong_relay"
+preferred_auth_method = "apikey"
+
+[model_providers.qianzong_relay]
+base_url = "https://api.example.com/v1"
+wire_api = "responses"
+"#,
+        )
+        .unwrap();
+        fs::write(
+            &auth_path,
+            r#"{"auth_mode":"apikey","OPENAI_API_KEY":"sk-relay"}"#,
+        )
+        .unwrap();
+
+        let vault = MemoryAuthVault::default();
+        let login_ready_settings = AppSettings {
+            unify_codex_session_history: true,
+            ..AppSettings::default()
+        };
+        sync_codex_config_for_paths(
+            &login_ready_settings,
+            &config_path,
+            &auth_path,
+            &restore_path,
+            &vault,
+            None,
+        )
+        .unwrap();
+
+        let config = fs::read_to_string(config_path).unwrap();
+        assert!(config.contains(r#"model_provider = "openai""#));
+        assert!(config.contains(r#"preferred_auth_method = "chatgpt""#));
+        assert!(!config.contains("qianzong_relay"));
+        assert!(!config.contains("qianzong_unified"));
+        assert_eq!(fs::read_to_string(auth_path).unwrap(), "{}\n");
+        assert!(!temp.path().read_dir().unwrap().any(|entry| entry
+            .unwrap()
+            .file_name()
+            .to_string_lossy()
+            .starts_with("auth.json.qianzong-backup-")));
+
+        let relay = AppSettings {
+            access_mode: CodexAccessMode::Relay,
+            api_endpoint: Some("https://api.example.com/v1".into()),
+            api_key: None,
+            ..AppSettings::default()
+        };
+        sync_codex_config_for_paths(
+            &relay,
+            &temp.path().join("config.toml"),
+            &temp.path().join("auth.json"),
+            &restore_path,
+            &vault,
+            None,
+        )
+        .unwrap();
+        assert!(fs::read_to_string(temp.path().join("auth.json"))
+            .unwrap()
+            .contains(r#""OPENAI_API_KEY": "sk-relay""#));
     }
 
     #[test]
