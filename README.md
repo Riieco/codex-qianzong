@@ -24,6 +24,13 @@
 - **本地优先**：SQLite、JSONL、配置同步等敏感操作都在本机 Rust 侧完成。
 - **跨平台桌面**：Tauri 2 + React + Rust，面向 Windows 和 macOS。
 
+### v1.5.1 更新
+
+- **认证保险箱**：完整保存官方 Codex `auth.json` 登录快照，并将中转 API Key 与对应端点绑定后加密保存；主密钥由系统 keyring 管理。
+- **可靠切换登录状态**：切到 API 中转前保留官方 access / refresh / ID token；切回官方模式时恢复原有登录状态。即使没有旧快照，也可以正常进入新的官方登录流程。
+- **统一会话历史**：可选让官方模式与 API 中转模式在同一台电脑上共用 Codex 会话历史；既有 JSONL 与 SQLite 记录仅在用户明确启用迁移后处理，并提供备份与恢复。
+- **跨平台安装包**：Release 提供 Windows x64 MSI，以及分别适用于 Apple Silicon 和 Intel Mac 的 DMG；DMG 内包含拖放到 `Applications` 的快捷入口。
+
 ### 第三方 API / API 中转
 
 设置页可以把 Codex 从官方原生模式切换到 API 中转模式：
@@ -75,7 +82,13 @@
 
 ### 安装与使用
 
-从 [Releases](https://github.com/396001000/codex-qianzong/releases) 下载 Windows 安装包，或从源码运行。
+从 [Releases](https://github.com/Riieco/codex-qianzong/releases) 下载对应系统的安装包，或从源码运行：
+
+- Windows x64：`codex-qianzong_1.5.1_x64.msi`
+- Apple Silicon Mac：`codex-qianzong_1.5.1_aarch64.dmg`
+- Intel Mac：`codex-qianzong_1.5.1_x86_64.dmg`
+
+macOS 安装包使用 ad-hoc 签名，尚未经过 Apple 公证，首次打开时可能出现系统安全提示。
 
 桌面快捷键：
 
@@ -183,6 +196,13 @@ It supports both official native login and third-party API / API relay mode. You
 - **Local-first boundary**: SQLite, JSONL, and Codex config operations stay in the Rust desktop layer.
 - **Cross-platform desktop**: Tauri 2 + React + Rust for Windows and macOS.
 
+### v1.5.1 changes
+
+- **Credential vault**: Preserve the complete official Codex `auth.json` login snapshot and encrypt relay API keys bound to their endpoints, with the master key stored in the operating-system keyring.
+- **Reliable auth switching**: Keep official access, refresh, and ID tokens before entering relay mode, then restore the previous login state when returning to official mode. A fresh official login remains available when no snapshot exists.
+- **Unified session history**: Optionally share Codex history between official and relay modes on the same machine. Existing JSONL and SQLite records are migrated only after explicit opt-in, with backups and restore support.
+- **Cross-platform installers**: Releases provide a Windows x64 MSI and separate DMGs for Apple Silicon and Intel Macs. Each DMG includes an `Applications` shortcut for drag-to-install.
+
 ### Third-party API / API Relay
 
 The settings drawer can switch Codex from official native mode to API relay mode:
@@ -234,7 +254,13 @@ The Skills board reads bounded metadata only. It does not send full `SKILL.md` b
 
 ### Install and run
 
-Download Windows installers from [Releases](https://github.com/396001000/codex-qianzong/releases), or run from source.
+Download the installer for your system from [Releases](https://github.com/Riieco/codex-qianzong/releases), or run from source:
+
+- Windows x64: `codex-qianzong_1.5.1_x64.msi`
+- Apple Silicon Mac: `codex-qianzong_1.5.1_aarch64.dmg`
+- Intel Mac: `codex-qianzong_1.5.1_x86_64.dmg`
+
+The macOS builds are ad-hoc signed and are not Apple-notarized, so macOS may show a security warning on first launch.
 
 Desktop shortcuts:
 

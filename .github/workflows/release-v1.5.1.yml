@@ -1,0 +1,278 @@
+name: Release v1.5.1
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-v1.5.1
+  cancel-in-progress: false
+
+env:
+  RELEASE_VERSION: 1.5.1
+  RELEASE_TAG: v1.5.1
+  SOURCE_REF: 726142d644a6e7ab0a7d4af2786e7c2b232a1c7c
+
+jobs:
+  test:
+    name: Test release source
+    runs-on: windows-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Check out release source
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ env.SOURCE_REF }}
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Rust build
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri -> target
+          shared-key: release-test-windows
+
+      - name: Install frontend dependencies
+        run: npm ci
+
+      - name: Run frontend tests
+        run: npm test
+
+      - name: Run Rust tests
+        run: cargo test --manifest-path src-tauri/Cargo.toml
+
+  build-windows:
+    name: Build Windows x64 MSI
+    needs: test
+    runs-on: windows-latest
+    timeout-minutes: 45
+
+    steps:
+      - name: Check out release source
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ env.SOURCE_REF }}
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Rust build
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri -> target
+          shared-key: release-build-windows
+
+      - name: Install frontend dependencies
+        run: npm ci
+
+      - name: Set release version
+        shell: pwsh
+        run: |
+          node -e "const fs=require('node:fs');const p='src-tauri/tauri.conf.json';const c=JSON.parse(fs.readFileSync(p,'utf8'));c.version=process.env.RELEASE_VERSION;fs.writeFileSync(p,JSON.stringify(c,null,2)+'\n');"
+
+      - name: Build MSI installer
+        run: npm run tauri build -- --bundles msi
+
+      - name: Collect MSI installer
+        shell: pwsh
+        run: |
+          $msi = Get-ChildItem "src-tauri/target/release/bundle/msi/*.msi" | Select-Object -First 1
+          if (-not $msi) {
+            throw "Tauri did not produce an MSI installer."
+          }
+
+          New-Item -ItemType Directory -Force "dist-artifacts" | Out-Null
+          Copy-Item $msi.FullName "dist-artifacts/codex-qianzong_${env:RELEASE_VERSION}_x64.msi"
+
+      - name: Upload MSI artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-windows-x64-msi
+          path: dist-artifacts/codex-qianzong_${{ env.RELEASE_VERSION }}_x64.msi
+          if-no-files-found: error
+          retention-days: 14
+
+  build-macos:
+    name: Build macOS ${{ matrix.name }} DMG
+    needs: test
+    runs-on: macos-14
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Apple Silicon
+            target: aarch64-apple-darwin
+            arch: aarch64
+          - name: Intel
+            target: x86_64-apple-darwin
+            arch: x86_64
+
+    env:
+      MACOS_TARGET: ${{ matrix.target }}
+      MACOS_ARCH: ${{ matrix.arch }}
+
+    steps:
+      - name: Check out release source
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ env.SOURCE_REF }}
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Cache Rust build
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri -> target
+          shared-key: release-build-${{ matrix.target }}
+
+      - name: Install frontend dependencies
+        run: npm ci
+
+      - name: Set release version
+        run: |
+          node -e "const fs=require('node:fs');const p='src-tauri/tauri.conf.json';const c=JSON.parse(fs.readFileSync(p,'utf8'));c.version=process.env.RELEASE_VERSION;fs.writeFileSync(p,JSON.stringify(c,null,2)+'\n');"
+
+      - name: Build macOS application
+        run: npm run tauri build -- --target "$MACOS_TARGET" --bundles app
+
+      - name: Ad-hoc sign application
+        run: codesign --force --deep --sign - "src-tauri/target/$MACOS_TARGET/release/bundle/macos/codex-qianzong.app"
+
+      - name: Create drag-to-install DMG
+        run: |
+          mkdir -p dist-artifacts
+          DMG_ROOT="$(mktemp -d "$RUNNER_TEMP/codex-qianzong-dmg.XXXXXX")"
+
+          ditto \
+            "src-tauri/target/$MACOS_TARGET/release/bundle/macos/codex-qianzong.app" \
+            "$DMG_ROOT/codex-qianzong.app"
+          ln -s /Applications "$DMG_ROOT/Applications"
+
+          hdiutil create \
+            -volname codex-qianzong \
+            -srcfolder "$DMG_ROOT" \
+            -format UDZO \
+            "dist-artifacts/codex-qianzong_${RELEASE_VERSION}_${MACOS_ARCH}.dmg"
+
+      - name: Verify DMG installer layout
+        run: |
+          DMG_PATH="dist-artifacts/codex-qianzong_${RELEASE_VERSION}_${MACOS_ARCH}.dmg"
+          MOUNT_POINT="$(mktemp -d "$RUNNER_TEMP/codex-qianzong-mount.XXXXXX")"
+
+          hdiutil attach -readonly -nobrowse -mountpoint "$MOUNT_POINT" "$DMG_PATH"
+          trap 'hdiutil detach "$MOUNT_POINT" >/dev/null 2>&1 || true' EXIT
+
+          test -d "$MOUNT_POINT/codex-qianzong.app"
+          test -L "$MOUNT_POINT/Applications"
+          test "$(readlink "$MOUNT_POINT/Applications")" = "/Applications"
+
+          hdiutil detach "$MOUNT_POINT"
+          trap - EXIT
+
+      - name: Upload DMG artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-macos-${{ matrix.arch }}-dmg
+          path: dist-artifacts/codex-qianzong_${{ env.RELEASE_VERSION }}_${{ matrix.arch }}.dmg
+          if-no-files-found: error
+          retention-days: 14
+
+  publish-release:
+    name: Publish GitHub Release
+    needs:
+      - build-windows
+      - build-macos
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Check out release source
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ env.SOURCE_REF }}
+
+      - name: Resolve release source commit
+        id: source
+        shell: bash
+        run: echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
+      - name: Download release artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: release-*
+          path: release-assets
+          merge-multiple: true
+
+      - name: Verify release assets
+        shell: bash
+        run: |
+          expected=(
+            "codex-qianzong_${RELEASE_VERSION}_x64.msi"
+            "codex-qianzong_${RELEASE_VERSION}_aarch64.dmg"
+            "codex-qianzong_${RELEASE_VERSION}_x86_64.dmg"
+          )
+
+          for file in "${expected[@]}"; do
+            test -f "release-assets/$file" || {
+              echo "::error::Missing release asset: $file"
+              exit 1
+            }
+          done
+
+      - name: Write release notes
+        shell: bash
+        run: |
+          cat > release-notes.md <<'EOF'
+          ## v1.5.1
+
+          - Preserve the complete official Codex `auth.json` login state in the encrypted credential vault when switching to API relay mode.
+          - Restore the previous official login state when switching back, while keeping relay credentials bound to their endpoint.
+          - Add optional same-machine unified Codex session history, including guarded migration, backups, and restore support.
+          - Provide Windows x64 MSI and separate Apple Silicon/Intel macOS DMGs.
+
+          The macOS builds are ad-hoc signed and are not Apple-notarized.
+          EOF
+
+      - name: Create GitHub Release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SOURCE_SHA: ${{ steps.source.outputs.sha }}
+        run: |
+          if gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "::error::Release $RELEASE_TAG already exists."
+            exit 1
+          fi
+
+          gh release create "$RELEASE_TAG" \
+            release-assets/* \
+            --repo "$GITHUB_REPOSITORY" \
+            --target "$SOURCE_SHA" \
+            --title "codex-qianzong $RELEASE_TAG" \
+            --notes-file release-notes.md
