@@ -9,11 +9,18 @@ use chacha20poly1305::{
 };
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
-use std::{fs, path::PathBuf};
+use std::{
+    fs,
+    path::{Path, PathBuf},
+};
 
 const VAULT_VERSION: u32 = 1;
 const VAULT_MAGIC: &[u8; 8] = b"CQAUTH01";
+#[cfg(not(windows))]
+const LOCAL_MASTER_KEY_FILE: &str = "auth-vault.key";
+#[cfg(windows)]
 const KEYRING_SERVICE: &str = "com.qianzong.codex";
+#[cfg(windows)]
 const KEYRING_ACCOUNT: &str = "auth-vault-master-key";
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -91,16 +98,29 @@ impl AuthVaultStore for SystemAuthVault {
             return Ok(AuthVaultData::default());
         }
         let encrypted = fs::read(&path)?;
-        let key = load_master_key(false)?.ok_or_else(|| {
-            AppError::Config("认证保险箱主密钥缺失，无法读取已保存凭据".to_string())
-        })?;
+        let Some(key) = load_master_key(false)? else {
+            #[cfg(not(windows))]
+            return Ok(AuthVaultData::default());
+            #[cfg(windows)]
+            return Err(AppError::Config(
+                "认证保险箱主密钥缺失，无法读取已保存凭据".to_string(),
+            ));
+        };
         decrypt_vault(&encrypted, &key)
     }
 
     fn save(&self, data: &AuthVaultData) -> AppResult<()> {
         let path = vault_path()?;
-        let key = load_master_key(true)?
-            .ok_or_else(|| AppError::Config("无法创建认证保险箱主密钥".to_string()))?;
+        let existing_key = load_master_key(false)?;
+        #[cfg(not(windows))]
+        if existing_key.is_none() && path.exists() {
+            backup_legacy_vault(&path)?;
+        }
+        let key = match existing_key {
+            Some(key) => key,
+            None => load_master_key(true)?
+                .ok_or_else(|| AppError::Config("无法创建认证保险箱主密钥".to_string()))?,
+        };
         let encrypted = encrypt_vault(data, &key)?;
         atomic_write(&path, &encrypted)
     }
@@ -181,13 +201,17 @@ fn has_official_login_material(value: &Value) -> bool {
 }
 
 fn vault_path() -> AppResult<PathBuf> {
-    let app_dir = paths::app_log_dir()?
-        .parent()
-        .map(std::path::Path::to_path_buf)
-        .unwrap_or_else(|| PathBuf::from("."));
-    Ok(app_dir.join("auth-vault.bin"))
+    Ok(vault_dir()?.join("auth-vault.bin"))
 }
 
+fn vault_dir() -> AppResult<PathBuf> {
+    Ok(paths::app_log_dir()?
+        .parent()
+        .map(Path::to_path_buf)
+        .unwrap_or_else(|| PathBuf::from(".")))
+}
+
+#[cfg(windows)]
 fn load_master_key(create: bool) -> AppResult<Option<[u8; 32]>> {
     let entry = keyring::Entry::new(KEYRING_SERVICE, KEYRING_ACCOUNT)
         .map_err(|err| AppError::Config(format!("初始化系统凭据库失败: {err}")))?;
@@ -208,10 +232,76 @@ fn load_master_key(create: bool) -> AppResult<Option<[u8; 32]>> {
     Ok(Some(result))
 }
 
+#[cfg(not(windows))]
+fn load_master_key(create: bool) -> AppResult<Option<[u8; 32]>> {
+    load_file_master_key(&vault_dir()?.join(LOCAL_MASTER_KEY_FILE), create)
+}
+
+#[cfg(not(windows))]
+fn load_file_master_key(path: &Path, create: bool) -> AppResult<Option<[u8; 32]>> {
+    use std::io::Write;
+    use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
+
+    if path.exists() {
+        fs::set_permissions(path, fs::Permissions::from_mode(0o600))?;
+        let bytes = fs::read(path)?;
+        if bytes.len() != 32 {
+            return Err(AppError::Config("认证保险箱本地主密钥格式无效".to_string()));
+        }
+        let mut key = [0_u8; 32];
+        key.copy_from_slice(&bytes);
+        return Ok(Some(key));
+    }
+    if !create {
+        return Ok(None);
+    }
+
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)?;
+    }
+    let key = ChaCha20Poly1305::generate_key(&mut OsRng);
+    let mut file = match fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .mode(0o600)
+        .open(path)
+    {
+        Ok(file) => file,
+        Err(err) if err.kind() == std::io::ErrorKind::AlreadyExists => {
+            return load_file_master_key(path, false);
+        }
+        Err(err) => return Err(err.into()),
+    };
+    file.write_all(key.as_slice())?;
+    file.sync_all()?;
+    fs::set_permissions(path, fs::Permissions::from_mode(0o600))?;
+
+    let mut result = [0_u8; 32];
+    result.copy_from_slice(key.as_slice());
+    Ok(Some(result))
+}
+
+#[cfg(not(windows))]
+fn backup_legacy_vault(path: &Path) -> AppResult<()> {
+    use std::os::unix::fs::PermissionsExt;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    let timestamp = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis();
+    let backup = path.with_file_name(format!("auth-vault.keychain-backup-{timestamp}.bin"));
+    fs::copy(path, &backup)?;
+    fs::set_permissions(backup, fs::Permissions::from_mode(0o600))?;
+    Ok(())
+}
+
+#[cfg(windows)]
 fn encode_key(key: &[u8]) -> String {
     key.iter().map(|byte| format!("{byte:02x}")).collect()
 }
 
+#[cfg(windows)]
 fn decode_key(value: &str) -> AppResult<[u8; 32]> {
     if value.len() != 64 {
         return Err(AppError::Config("认证保险箱主密钥格式无效".to_string()));
@@ -261,7 +351,13 @@ fn decrypt_vault(bytes: &[u8], key: &[u8; 32]) -> AppResult<AuthVaultData> {
 }
 
 fn atomic_write(path: &std::path::Path, bytes: &[u8]) -> AppResult<()> {
-    atomic_file::write(path, bytes).map_err(Into::into)
+    atomic_file::write(path, bytes)?;
+    #[cfg(not(windows))]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        fs::set_permissions(path, fs::Permissions::from_mode(0o600))?;
+    }
+    Ok(())
 }
 
 #[cfg(test)]
@@ -323,5 +419,22 @@ mod tests {
         assert!(has_official_login_material(&serde_json::json!({
             "tokens": { "refresh_token": "refresh" }
         })));
+    }
+
+    #[cfg(not(windows))]
+    #[test]
+    fn local_master_key_is_stable_and_private() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join(LOCAL_MASTER_KEY_FILE);
+        let created = load_file_master_key(&path, true).unwrap().unwrap();
+        let loaded = load_file_master_key(&path, false).unwrap().unwrap();
+
+        assert_eq!(created, loaded);
+        assert_eq!(
+            fs::metadata(path).unwrap().permissions().mode() & 0o777,
+            0o600
+        );
     }
 }

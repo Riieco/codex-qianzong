@@ -5,15 +5,16 @@
 ![codex-qianzong dashboard](docs/assets/dashboard-overview.png)
 
 <!-- release-verification:start -->
+
 ## 最新发布校验 / Latest Release Verification
 
 当前版本 / Current version: `v1.5.3`
 
-| 文件 / File | SHA-256 |
-| --- | --- |
-| `codex-qianzong_1.5.3_x64.msi` | `e737716cfdd74335e20598ff69a8b5d9d3a6e9935cad51b1ad4e01dbed3f7778` |
+| 文件 / File                        | SHA-256                                                            |
+| ---------------------------------- | ------------------------------------------------------------------ |
+| `codex-qianzong_1.5.3_x64.msi`     | `e737716cfdd74335e20598ff69a8b5d9d3a6e9935cad51b1ad4e01dbed3f7778` |
 | `codex-qianzong_1.5.3_aarch64.dmg` | `2a340c98a2c6bde8426d45d7ad3115f297c3ba72c9a422b20e2591136517bb32` |
-| `codex-qianzong_1.5.3_x86_64.dmg` | `dc99a5a62a9b66bb80c80ae308655d5c4b6899a02246fc5aa302bf3bf9d2f051` |
+| `codex-qianzong_1.5.3_x86_64.dmg`  | `dc99a5a62a9b66bb80c80ae308655d5c4b6899a02246fc5aa302bf3bf9d2f051` |
 
 附注：
 
@@ -39,7 +40,7 @@ Notes:
 - **额度窗口监控**：展示 5 小时 / 7 天滚动额度窗口和重置时间。
 - **令牌价值估算**：按官方 API 价格估算今日、近 7 天、累计和当前会员周期价值。
 - **官方原生 / API 中转一键切换**：自动同步 Codex `config.toml` 与 `auth.json`，保留 MCP、项目路径和 trust records 等无关配置。
-- **加密认证保险箱**：完整保存官方 `auth.json` 登录信息和中转 API Key；密文使用 ChaCha20-Poly1305，主密钥保存在系统钥匙串。
+- **加密认证保险箱**：完整保存官方 `auth.json` 登录信息和中转 API Key；密文使用 ChaCha20-Poly1305。Windows 主密钥由系统凭据库管理，macOS 使用应用数据目录中的 `0600` 本地密钥文件，不申请 Keychain 权限。
 - **API Key 复用**：中转 Key 与 API 地址绑定，同一地址再次切换时无需重复输入；地址变化时要求提供新的 Key。
 - **模型自动获取**：填写 API 地址和 Key 后，可调用 `GET /v1/models` 获取 OpenAI 文本 / 推理 / Codex 模型选项；同时保留不受限制的手动填写。
 - **统一本机会话历史**：可选地让官方和中转模式共用本机 Codex 会话；支持迁移现有 JSONL 与 `state_5.sqlite`，并可从备份恢复。
@@ -240,7 +241,7 @@ It supports both official native login and third-party API relay mode. Settings 
 - **Quota windows**: Monitor 5-hour and 7-day rolling quota windows.
 - **Token value estimate**: Estimate today, 7-day, lifetime, and membership-cycle value using official API pricing assumptions.
 - **Official / API relay one-click switch**: Synchronize Codex `config.toml` and `auth.json` while preserving unrelated MCP, project-path, and trust settings.
-- **Encrypted credential vault**: Preserve the complete official `auth.json` login and the relay API Key. Vault data uses ChaCha20-Poly1305, with its master key held by the OS keyring.
+- **Encrypted credential vault**: Preserve the complete official `auth.json` login and the relay API Key. Windows keeps the master key in the system credential store; macOS uses a local `0600` key file in the app data directory and does not request Keychain access.
 - **Endpoint-bound Key reuse**: Reuse the stored relay Key for the same endpoint without entering it again; changing the endpoint requires a new Key.
 - **Model discovery**: Call `GET /v1/models` after entering an endpoint and Key, choose from eligible OpenAI text/reasoning/Codex models, or enter any model manually.
 - **Unified local session history**: Optionally share local Codex sessions between official and relay modes, migrate existing JSONL and `state_5.sqlite` records, and restore them from managed backups.

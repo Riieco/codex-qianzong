@@ -49,6 +49,7 @@
 ## 2026-07-16
 
 - 官方原生和 API 中转改为双槽认证：完整官方 `auth.json` 与端点绑定的中转 API Key 存入加密保险箱，主密钥由系统 keyring 保存，设置 IPC 只返回脱敏状态。
+- macOS 认证保险箱不再访问 Keychain；主密钥改存应用数据目录的 `auth-vault.key` 并强制使用 `0600` 权限，旧 keyring 保险箱会在首次重建前保留迁移备份。Windows 继续使用系统凭据库。
 - 切到中转前捕获官方 access/refresh/ID token 与未知字段；切回官方时恢复整个快照。中转 Key 和端点/模型/推理/速度偏好继续保留，地址变化时必须重新输入对应 Key。
 - 新增默认关闭的统一 Codex 会话历史。开启后两种模式共用 `qianzong_unified` provider；可选择迁移既有 JSONL `session_meta` 和 `state_5.sqlite` thread provider。
 - 历史迁移使用 SQLite backup/transaction、JSONL 与数据库备份、原 provider 账本和迁移锁；关闭统一历史后可按账本恢复，未知 provider 不会被改写。
