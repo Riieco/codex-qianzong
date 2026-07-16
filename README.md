@@ -147,7 +147,7 @@ Windows 产物位于：
 src-tauri/target/release/bundle/
 ```
 
-仓库的 macOS GitHub Actions 工作流会分别构建 Apple Silicon 和 Intel DMG。
+仓库的 GitHub Actions 安装包工作流会构建 Windows x64 MSI，并分别构建 Apple Silicon 和 Intel DMG。三个安装包均作为工作流 artifact 上传。
 
 ### 技术栈
 
@@ -327,7 +327,7 @@ Windows artifacts are written under:
 src-tauri/target/release/bundle/
 ```
 
-The repository's macOS GitHub Actions workflow builds separate Apple Silicon and Intel DMGs.
+The repository's GitHub Actions installer workflow builds a Windows x64 MSI plus separate Apple Silicon and Intel DMGs. All three installers are uploaded as workflow artifacts.
 
 ### Stack
 

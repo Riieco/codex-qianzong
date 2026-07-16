@@ -40,7 +40,13 @@ Tauri writes Windows artifacts under:
 src-tauri/target/release/bundle/
 ```
 
-The concrete `.msi` / `.exe` shape depends on installed Tauri bundler support.
+The GitHub Actions installer workflow builds the x64 MSI explicitly and uploads:
+
+```text
+codex-qianzong_1.5.2_x64.msi
+```
+
+Local `npm run tauri build` may also produce an NSIS `.exe`, depending on the installed Tauri bundler support.
 
 ## Runtime Behavior
 

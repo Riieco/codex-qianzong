@@ -1,4 +1,4 @@
-name: Build macOS DMG
+name: Build desktop installers
 
 on:
   workflow_dispatch:
@@ -9,7 +9,65 @@ on:
 permissions:
   contents: read
 
+env:
+  RELEASE_VERSION: 1.5.2
+
 jobs:
+  build-msi:
+    name: Build Windows x64 MSI
+    runs-on: windows-latest
+    timeout-minutes: 45
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Rust build
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri -> target
+          shared-key: windows-x64
+
+      - name: Install frontend dependencies
+        run: npm ci
+
+      - name: Run frontend tests
+        run: npm test
+
+      - name: Run Rust tests on Windows
+        run: cargo test --manifest-path src-tauri/Cargo.toml
+
+      - name: Build MSI installer
+        run: npm run tauri build -- --bundles msi
+
+      - name: Collect MSI installer
+        shell: pwsh
+        run: |
+          $msi = Get-ChildItem "src-tauri/target/release/bundle/msi/*.msi" -File | Select-Object -First 1
+          if (-not $msi) {
+            throw "Tauri did not produce an MSI installer."
+          }
+
+          New-Item -ItemType Directory -Force "dist-artifacts" | Out-Null
+          Copy-Item $msi.FullName "dist-artifacts/codex-qianzong_${env:RELEASE_VERSION}_x64.msi"
+
+      - name: Upload MSI artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: codex-qianzong-windows-x64-msi
+          path: dist-artifacts/codex-qianzong_${{ env.RELEASE_VERSION }}_x64.msi
+          if-no-files-found: error
+          retention-days: 14
+
   build-dmg:
     name: Build ${{ matrix.name }} DMG
     runs-on: macos-14
@@ -79,11 +137,11 @@ jobs:
             -volname codex-qianzong \
             -srcfolder "$DMG_ROOT" \
             -format UDZO \
-            "dist-artifacts/codex-qianzong_1.5.2_$MACOS_ARCH-test.dmg"
+            "dist-artifacts/codex-qianzong_${RELEASE_VERSION}_$MACOS_ARCH-test.dmg"
 
       - name: Verify DMG installer layout
         run: |
-          DMG_PATH="dist-artifacts/codex-qianzong_1.5.2_$MACOS_ARCH-test.dmg"
+          DMG_PATH="dist-artifacts/codex-qianzong_${RELEASE_VERSION}_$MACOS_ARCH-test.dmg"
           MOUNT_POINT="$(mktemp -d "$RUNNER_TEMP/codex-qianzong-mount.XXXXXX")"
 
           hdiutil attach -readonly -nobrowse -mountpoint "$MOUNT_POINT" "$DMG_PATH"
@@ -100,6 +158,6 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: codex-qianzong-macos-${{ matrix.arch }}-dmg
-          path: dist-artifacts/codex-qianzong_1.5.2_${{ matrix.arch }}-test.dmg
+          path: dist-artifacts/codex-qianzong_${{ env.RELEASE_VERSION }}_${{ matrix.arch }}-test.dmg
           if-no-files-found: error
           retention-days: 14
