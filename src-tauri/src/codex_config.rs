@@ -9,7 +9,7 @@ use chrono::Local;
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 use std::{
-    collections::HashSet,
+    collections::{HashMap, HashSet},
     fs,
     path::{Path, PathBuf},
 };
@@ -394,13 +394,40 @@ fn is_repairable_duplicate_error(message: &str) -> bool {
 }
 
 fn repair_known_duplicate_tables(text: &str) -> Option<String> {
+    let lines = text.split_inclusive('\n').collect::<Vec<_>>();
+    let mut first_expanded_tables = HashMap::new();
+    for (index, line) in lines.iter().enumerate() {
+        if let Some(table) = repairable_table_header(line) {
+            first_expanded_tables.entry(table).or_insert(index);
+        }
+    }
+    if first_expanded_tables.is_empty() {
+        return None;
+    }
+
     let mut seen = HashSet::new();
     let mut repaired = false;
     let mut output = String::with_capacity(text.len());
+    let mut current_table = String::new();
 
-    for line in text.split_inclusive('\n') {
-        if let Some(table) = repairable_table_header(line) {
-            if !seen.insert(table) {
+    for (index, line) in lines.into_iter().enumerate() {
+        if let Some(table_path) = table_header_path(line) {
+            current_table = table_path;
+            if let Some(table) = REPAIRABLE_DUPLICATE_TABLES
+                .iter()
+                .copied()
+                .find(|known| *known == current_table)
+            {
+                if !seen.insert(table) {
+                    repaired = true;
+                    continue;
+                }
+            }
+        } else if let Some(table) = repairable_inline_assignment(line, &current_table) {
+            if first_expanded_tables
+                .get(table)
+                .is_some_and(|header_index| index < *header_index)
+            {
                 repaired = true;
                 continue;
             }
@@ -412,19 +439,37 @@ fn repair_known_duplicate_tables(text: &str) -> Option<String> {
 }
 
 fn repairable_table_header(line: &str) -> Option<&'static str> {
-    let code = line.split('#').next()?.trim();
-    if code.starts_with("[[") || !code.starts_with('[') || !code.ends_with(']') {
-        return None;
-    }
-    let normalized = code[1..code.len() - 1]
-        .split('.')
-        .map(str::trim)
-        .collect::<Vec<_>>()
-        .join(".");
+    let normalized = table_header_path(line)?;
     REPAIRABLE_DUPLICATE_TABLES
         .iter()
         .copied()
         .find(|known| *known == normalized)
+}
+
+fn table_header_path(line: &str) -> Option<String> {
+    let code = line.split('#').next()?.trim();
+    if code.starts_with("[[") || !code.starts_with('[') || !code.ends_with(']') {
+        return None;
+    }
+    Some(normalize_dotted_key(&code[1..code.len() - 1]))
+}
+
+fn repairable_inline_assignment(line: &str, current_table: &str) -> Option<&'static str> {
+    let (key, _) = line.trim().split_once('=')?;
+    let key = normalize_dotted_key(key);
+    let path = if current_table.is_empty() {
+        key
+    } else {
+        format!("{current_table}.{key}")
+    };
+    REPAIRABLE_DUPLICATE_TABLES
+        .iter()
+        .copied()
+        .find(|known| *known == path)
+}
+
+fn normalize_dotted_key(key: &str) -> String {
+    key.split('.').map(str::trim).collect::<Vec<_>>().join(".")
 }
 
 fn ensure_restore_snapshot(
@@ -863,6 +908,45 @@ contrast = "high"
             .file_name()
             .to_string_lossy()
             .starts_with("config.toml.qianzong-backup-")));
+    }
+
+    #[test]
+    fn sync_prefers_expanded_desktop_theme_over_older_inline_theme() {
+        let temp = tempfile::tempdir().unwrap();
+        let config_path = temp.path().join("config.toml");
+        let auth_path = temp.path().join("auth.json");
+        let restore_path = temp.path().join("restore.toml");
+        fs::write(
+            &config_path,
+            r##"model = "gpt-5.5"
+
+[desktop]
+appearanceDarkChromeTheme = { accent = "#63E6FF", contrast = 72 }
+
+[desktop.appearanceDarkChromeTheme ]
+accent = "#ff6363"
+contrast = 60
+
+[desktop.appearanceDarkChromeTheme.fonts]
+code = '"Jetbrains Mono"'
+ui = "Inter"
+"##,
+        )
+        .unwrap();
+
+        sync_test(
+            &AppSettings::default(),
+            &config_path,
+            &auth_path,
+            &restore_path,
+        )
+        .unwrap();
+
+        let text = fs::read_to_string(&config_path).unwrap();
+        assert!(!text.contains("#63E6FF"));
+        assert!(text.contains(r##"accent = "#ff6363""##));
+        assert!(text.contains("[desktop.appearanceDarkChromeTheme.fonts]"));
+        assert!(text.contains(r#"ui = "Inter""#));
     }
 
     #[test]
