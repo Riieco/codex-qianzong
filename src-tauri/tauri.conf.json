@@ -1,7 +1,7 @@
 {
   "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
   "productName": "codex-qianzong",
-  "version": "1.5.2",
+  "version": "1.5.3",
   "identifier": "com.qianzong.codex",
   "build": {
     "beforeDevCommand": "npm run dev:frontend",
