@@ -4,6 +4,16 @@
 
 ![codex-qianzong dashboard](docs/assets/dashboard-overview.png)
 
+<!-- release-verification:start -->
+
+## 最新发布校验 / Latest Release Verification
+
+运行手动发布工作流后，此处会自动写入当前版本安装包的 SHA-256、实际文件名和 macOS 下载说明。
+
+After the manual release workflow completes, this section is updated with installer SHA-256 values, exact filenames, and macOS download notes.
+
+<!-- release-verification:end -->
+
 ## 中文
 
 `codex-qianzong` 是一个开源的跨平台 Codex 桌面仪表盘，用于管理本机 Codex / ChatGPT Codex 的官方登录与 API 中转切换，并查看额度窗口、令牌用量、价值估算、会话状态、Skills 技能和运行环境诊断。
@@ -148,6 +158,18 @@ src-tauri/target/release/bundle/
 ```
 
 仓库的 GitHub Actions 安装包工作流会构建 Windows x64 MSI，并分别构建 Apple Silicon 和 Intel DMG。三个安装包均作为工作流 artifact 上传。
+
+### 手动发布 Release
+
+维护者可在 GitHub `Actions` 页面选择 `Publish release`，点击 `Run workflow`，从 `main` 分支运行并填写尚未使用的版本号，例如 `1.5.3`。工作流会自动：
+
+- 更新 npm、Cargo 和 Tauri 的项目版本并提交到 `main`
+- 运行前端测试、ESLint 和 Rust 测试
+- 构建 Windows x64 MSI、Apple Silicon DMG 和 Intel DMG
+- 计算三个安装包的 SHA-256，并更新 README 顶部的发布校验区块
+- 创建 `v版本号` tag 和 GitHub Release，上传安装包及 `SHA256SUMS.txt`
+
+不要提前创建 tag；已有 tag 或 Release 的版本号会被拒绝。仓库必须允许 GitHub Actions 使用 `contents: write` 向 `main` 推送版本与 README 提交。
 
 ### 技术栈
 
@@ -328,6 +350,18 @@ src-tauri/target/release/bundle/
 ```
 
 The repository's GitHub Actions installer workflow builds a Windows x64 MSI plus separate Apple Silicon and Intel DMGs. All three installers are uploaded as workflow artifacts.
+
+### Manual GitHub Release
+
+Maintainers can open GitHub `Actions`, select `Publish release`, click `Run workflow`, choose `main`, and enter an unused version such as `1.5.3`. The workflow automatically:
+
+- updates the npm, Cargo, and Tauri project versions and commits them to `main`
+- runs frontend tests, ESLint, and Rust tests
+- builds a Windows x64 MSI plus Apple Silicon and Intel DMGs
+- computes installer SHA-256 values and updates the verification block at the top of this README
+- creates the `v<version>` tag and GitHub Release, then uploads the installers and `SHA256SUMS.txt`
+
+Do not create the tag first; versions with an existing tag or Release are rejected. The repository must allow GitHub Actions with `contents: write` to push the version and README commits to `main`.
 
 ### Stack
 
