@@ -5,13 +5,25 @@
 ![codex-qianzong dashboard](docs/assets/dashboard-overview.png)
 
 <!-- release-verification:start -->
-
 ## 最新发布校验 / Latest Release Verification
 
-运行手动发布工作流后，此处会自动写入当前版本安装包的 SHA-256、实际文件名和 macOS 下载说明。
+当前版本 / Current version: `v1.5.2`
 
-After the manual release workflow completes, this section is updated with installer SHA-256 values, exact filenames, and macOS download notes.
+| 文件 / File | SHA-256 |
+| --- | --- |
+| `codex-qianzong_1.5.2_x64.msi` | `a4bc707bbd80e81df223c6a52ce392c3aae98b9337f05d1311b2b827b8e663ff` |
+| `codex-qianzong_1.5.2_aarch64.dmg` | `a90baa3dd56cd174566f4e1d1c1f284096d80cede060bdc97b17ddb19b18c24d` |
+| `codex-qianzong_1.5.2_x86_64.dmg` | `f9aabf9d1abc8cd5bd0784a33fade85685568f293bf405ee8940f3c10d5614d1` |
 
+附注：
+
+- Apple Silicon 请下载 `codex-qianzong_1.5.2_aarch64.dmg`
+- Mac Intel 请下载 `codex-qianzong_1.5.2_x86_64.dmg`
+
+Notes:
+
+- Apple Silicon: download `codex-qianzong_1.5.2_aarch64.dmg`
+- Mac Intel: download `codex-qianzong_1.5.2_x86_64.dmg`
 <!-- release-verification:end -->
 
 ## 中文
