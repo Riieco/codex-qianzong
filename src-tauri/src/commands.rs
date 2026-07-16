@@ -10,6 +10,7 @@ use crate::{
     error::{AppError, AppResult},
     history_migration::{self, HistoryRestoreOutcome},
     local_db::read_task_board,
+    model_catalog,
     models::{
         AppSettings, CodexAccessMode, CodexConfigBackup, DetectionPaths, TaskBoard, UsageSnapshot,
     },
@@ -89,6 +90,14 @@ pub async fn get_auth_credential_status() -> AppResult<AuthCredentialStatus> {
 #[tauri::command]
 pub async fn clear_relay_api_key() -> AppResult<AuthCredentialStatus> {
     clear_stored_relay_api_key()
+}
+
+#[tauri::command]
+pub async fn fetch_api_models(
+    api_endpoint: String,
+    api_key: Option<String>,
+) -> AppResult<Vec<String>> {
+    model_catalog::fetch_openai_models(&api_endpoint, api_key.as_deref()).await
 }
 
 #[tauri::command]

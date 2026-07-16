@@ -58,7 +58,9 @@ button {
   border-bottom: 1px solid var(--stroke-subtle);
   background: var(--surface-header);
   box-shadow: 0 8px 24px rgba(20, 28, 48, 0.08);
-  cursor: move;
+  cursor: default;
+  user-select: none;
+  -webkit-user-select: none;
 }
 
 .app-content-scroll {
@@ -889,6 +891,38 @@ h1 {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 10px;
+}
+
+.model-picker-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: end;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.model-picker-row label {
+  margin-bottom: 0;
+}
+
+.model-fetch-button {
+  height: 36px;
+  padding: 0 10px;
+  white-space: nowrap;
+}
+
+.model-fetch-status {
+  margin: -3px 0 12px;
+}
+
+.spin {
+  animation: spin 0.9s linear infinite;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
 }
 
 .config-backup-panel {

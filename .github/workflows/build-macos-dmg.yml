@@ -79,11 +79,11 @@ jobs:
             -volname codex-qianzong \
             -srcfolder "$DMG_ROOT" \
             -format UDZO \
-            "dist-artifacts/codex-qianzong_1.5.0_$MACOS_ARCH-test.dmg"
+            "dist-artifacts/codex-qianzong_1.5.2_$MACOS_ARCH-test.dmg"
 
       - name: Verify DMG installer layout
         run: |
-          DMG_PATH="dist-artifacts/codex-qianzong_1.5.0_$MACOS_ARCH-test.dmg"
+          DMG_PATH="dist-artifacts/codex-qianzong_1.5.2_$MACOS_ARCH-test.dmg"
           MOUNT_POINT="$(mktemp -d "$RUNNER_TEMP/codex-qianzong-mount.XXXXXX")"
 
           hdiutil attach -readonly -nobrowse -mountpoint "$MOUNT_POINT" "$DMG_PATH"
@@ -100,6 +100,6 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: codex-qianzong-macos-${{ matrix.arch }}-dmg
-          path: dist-artifacts/codex-qianzong_1.5.0_${{ matrix.arch }}-test.dmg
+          path: dist-artifacts/codex-qianzong_1.5.2_${{ matrix.arch }}-test.dmg
           if-no-files-found: error
           retention-days: 14

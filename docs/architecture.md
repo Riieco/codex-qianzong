@@ -40,6 +40,7 @@ Stable commands:
 - `save_app_settings`
 - `get_auth_credential_status`
 - `clear_relay_api_key`
+- `fetch_api_models`
 - `has_unified_history_backup`
 - `restore_unified_history`
 - `list_codex_config_backups`
@@ -71,6 +72,7 @@ Command return values are serializable Rust structs that mirror the TypeScript t
 - Global shortcut permissions are declared in Tauri capabilities.
 - Borderless window dragging, minimize, and close use the Tauri window API and require explicit `core:window:*` permissions in `src-tauri/capabilities/default.json`.
 - API relay settings store endpoint, model, reasoning effort, and speed in plain settings. API keys never enter `settings.json` or frontend responses.
+- Model discovery sends the API Key only as a Bearer header to the normalized configured host, does not follow redirects, and returns filtered model IDs rather than the raw upstream payload.
 - `src-tauri/src/auth_vault.rs` stores the relay endpoint/API Key and the complete official `auth.json` snapshot in a versioned ChaCha20-Poly1305 vault. The random master key is stored in the operating-system keyring. The relay Key is bound to its endpoint; changing the endpoint requires a new Key.
 - Switching to relay writes only relay auth fields to Codex `auth.json`. Switching back restores the full saved official auth object, including access/refresh/ID tokens and fields unknown to this app.
 - Codex config/auth, credential-vault, and JSONL rewrites use same-directory temporary files and atomic replacement. Windows uses `MoveFileExW` with replace and write-through flags.

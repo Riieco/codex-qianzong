@@ -52,6 +52,10 @@ export function clearRelayApiKey(): Promise<AuthCredentialStatus> {
   });
 }
 
+export function fetchApiModels(apiEndpoint: string, apiKey?: string | null): Promise<string[]> {
+  return call("fetch_api_models", { apiEndpoint, apiKey }, ["gpt-5", "gpt-4o", "o3"]);
+}
+
 export function hasUnifiedHistoryBackup(): Promise<boolean> {
   return call("has_unified_history_backup", undefined, false);
 }

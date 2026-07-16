@@ -7,6 +7,7 @@ mod commands;
 mod error;
 mod history_migration;
 mod local_db;
+mod model_catalog;
 mod models;
 mod paths;
 mod pricing;
@@ -18,10 +19,10 @@ mod snapshot;
 
 use commands::{
     archive_skill, clear_relay_api_key, create_codex_config_backup, delete_codex_config_backup,
-    disable_skill, enable_skill, get_app_settings, get_auth_credential_status, get_detection_paths,
-    get_skill_board, get_usage_snapshot, has_unified_history_backup, list_codex_config_backups,
-    open_log_folder, open_skill_folder, refresh_task_board, restore_codex_config_backup,
-    restore_unified_history, save_app_settings, set_always_on_top,
+    disable_skill, enable_skill, fetch_api_models, get_app_settings, get_auth_credential_status,
+    get_detection_paths, get_skill_board, get_usage_snapshot, has_unified_history_backup,
+    list_codex_config_backups, open_log_folder, open_skill_folder, refresh_task_board,
+    restore_codex_config_backup, restore_unified_history, save_app_settings, set_always_on_top,
 };
 use tauri::{
     menu::{MenuBuilder, MenuItemBuilder},
@@ -50,6 +51,7 @@ pub fn run() {
             get_app_settings,
             get_auth_credential_status,
             clear_relay_api_key,
+            fetch_api_models,
             has_unified_history_backup,
             restore_unified_history,
             save_app_settings,

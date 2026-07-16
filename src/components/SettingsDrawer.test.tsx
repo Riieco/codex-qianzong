@@ -3,6 +3,7 @@ import {
   clearRelayApiKey,
   createCodexConfigBackup,
   deleteCodexConfigBackup,
+  fetchApiModels,
   getAuthCredentialStatus,
   getDetectionPaths,
   hasUnifiedHistoryBackup,
@@ -17,6 +18,7 @@ vi.mock("../lib/api", () => ({
   clearRelayApiKey: vi.fn(),
   createCodexConfigBackup: vi.fn(),
   deleteCodexConfigBackup: vi.fn(),
+  fetchApiModels: vi.fn(),
   getAuthCredentialStatus: vi.fn(),
   getDetectionPaths: vi.fn(),
   hasUnifiedHistoryBackup: vi.fn(),
@@ -71,6 +73,7 @@ describe("SettingsDrawer", () => {
     vi.mocked(createCodexConfigBackup).mockResolvedValue([defaultBackup, manualBackup]);
     vi.mocked(restoreCodexConfigBackup).mockResolvedValue([defaultBackup, manualBackup]);
     vi.mocked(deleteCodexConfigBackup).mockResolvedValue([defaultBackup]);
+    vi.mocked(fetchApiModels).mockResolvedValue(["gpt-4o", "gpt-5", "o3"]);
   });
 
   it("hides relay-only fields in official mode", () => {
@@ -164,6 +167,32 @@ describe("SettingsDrawer", () => {
         speedMode: "fast",
       }),
     );
+  });
+
+  it("fetches OpenAI model options while keeping manual model input editable", async () => {
+    render(<SettingsDrawer settings={defaultSettings} onClose={() => {}} onSave={() => {}} />);
+
+    fireEvent.change(screen.getByLabelText("当前模式"), { target: { value: "relay" } });
+    fireEvent.change(screen.getByLabelText("API 地址"), {
+      target: { value: "api.example.com/v1/v1/" },
+    });
+    fireEvent.change(screen.getByLabelText("API Key"), { target: { value: "sk-test" } });
+    fireEvent.click(screen.getByRole("button", { name: "获取模型" }));
+
+    await waitFor(() =>
+      expect(fetchApiModels).toHaveBeenCalledWith("https://api.example.com/v1", "sk-test"),
+    );
+    expect(await screen.findByText("已获取 3 个 OpenAI 模型")).toBeInTheDocument();
+    expect(screen.getByLabelText("模型选项")).toHaveValue("gpt-5");
+
+    fireEvent.change(screen.getByLabelText("模型选项"), { target: { value: "gpt-4o" } });
+    expect(screen.getByLabelText("模型选项")).toHaveValue("gpt-4o");
+
+    fireEvent.change(screen.getByLabelText("模型选项"), { target: { value: "__manual__" } });
+    fireEvent.change(screen.getByLabelText("手动模型名字"), {
+      target: { value: "gpt-custom" },
+    });
+    expect(screen.getByLabelText("手动模型名字")).toHaveValue("gpt-custom");
   });
 
   it("shows the message from a structured Tauri save error", async () => {

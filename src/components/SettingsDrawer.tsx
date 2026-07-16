@@ -1,9 +1,10 @@
 import { useEffect, useState } from "react";
-import { History, KeyRound, RotateCcw, Save, Trash2, X } from "lucide-react";
+import { History, KeyRound, RefreshCw, RotateCcw, Save, Trash2, X } from "lucide-react";
 import {
   clearRelayApiKey,
   createCodexConfigBackup,
   deleteCodexConfigBackup,
+  fetchApiModels,
   getAuthCredentialStatus,
   getDetectionPaths,
   hasUnifiedHistoryBackup,
@@ -42,6 +43,10 @@ export function SettingsDrawer({ settings, onClose, onSave }: SettingsDrawerProp
   const [credentialStatus, setCredentialStatus] = useState<AuthCredentialStatus | null>(null);
   const [hasHistoryBackup, setHasHistoryBackup] = useState(false);
   const [isCredentialBusy, setIsCredentialBusy] = useState(false);
+  const [apiModels, setApiModels] = useState<string[]>([]);
+  const [modelInputMode, setModelInputMode] = useState<"catalog" | "manual">("manual");
+  const [isFetchingModels, setIsFetchingModels] = useState(false);
+  const [modelFetchError, setModelFetchError] = useState<string | null>(null);
   const selectedBackup = backups.find((backup) => backup.id === selectedBackupId) ?? null;
 
   useEffect(() => {
@@ -136,6 +141,28 @@ export function SettingsDrawer({ settings, onClose, onSave }: SettingsDrawerProp
       setSaveError(formatError(err));
     } finally {
       setIsCredentialBusy(false);
+    }
+  }
+
+  async function handleFetchModels() {
+    const endpoint = normalizeApiEndpoint(draft.apiEndpoint ?? "");
+    if (!endpoint) {
+      setModelFetchError("请先填写 API 地址");
+      return;
+    }
+    setDraft((current) => ({ ...current, apiEndpoint: endpoint }));
+    setIsFetchingModels(true);
+    setModelFetchError(null);
+    try {
+      const models = await fetchApiModels(endpoint, draft.apiKey);
+      setApiModels(models);
+      setModelInputMode(models.includes(draft.apiModel) ? "catalog" : "manual");
+    } catch (err) {
+      setApiModels([]);
+      setModelInputMode("manual");
+      setModelFetchError(formatError(err));
+    } finally {
+      setIsFetchingModels(false);
     }
   }
 
@@ -269,9 +296,12 @@ export function SettingsDrawer({ settings, onClose, onSave }: SettingsDrawerProp
                 onBlur={(event) =>
                   setDraft({ ...draft, apiEndpoint: normalizeApiEndpoint(event.target.value) })
                 }
-                onChange={(event) =>
-                  setDraft({ ...draft, apiEndpoint: event.target.value || null })
-                }
+                onChange={(event) => {
+                  setDraft({ ...draft, apiEndpoint: event.target.value || null });
+                  setApiModels([]);
+                  setModelInputMode("manual");
+                  setModelFetchError(null);
+                }}
               />
             </label>
 
@@ -302,14 +332,67 @@ export function SettingsDrawer({ settings, onClose, onSave }: SettingsDrawerProp
               </button>
             )}
 
-            <label>
-              模型名字
-              <input
-                value={draft.apiModel}
-                placeholder="gpt-5"
-                onChange={(event) => setDraft({ ...draft, apiModel: event.target.value })}
-              />
-            </label>
+            <div className="model-picker-row">
+              <label>
+                {apiModels.length > 0 ? "模型选项" : "模型名字"}
+                {apiModels.length > 0 ? (
+                  <select
+                    value={modelInputMode === "catalog" ? draft.apiModel : "__manual__"}
+                    onChange={(event) => {
+                      if (event.target.value === "__manual__") {
+                        setModelInputMode("manual");
+                      } else {
+                        setModelInputMode("catalog");
+                        setDraft({ ...draft, apiModel: event.target.value });
+                      }
+                    }}
+                  >
+                    {apiModels.map((model) => (
+                      <option key={model} value={model}>
+                        {model}
+                      </option>
+                    ))}
+                    <option value="__manual__">手动填写</option>
+                  </select>
+                ) : (
+                  <input
+                    value={draft.apiModel}
+                    placeholder="gpt-5"
+                    onChange={(event) => setDraft({ ...draft, apiModel: event.target.value })}
+                  />
+                )}
+              </label>
+              <button
+                className="quiet-button model-fetch-button"
+                type="button"
+                disabled={isFetchingModels || !(draft.apiEndpoint ?? "").trim()}
+                onClick={() => void handleFetchModels()}
+              >
+                <RefreshCw size={14} className={isFetchingModels ? "spin" : undefined} />
+                {isFetchingModels ? "获取中" : "获取模型"}
+              </button>
+            </div>
+            {apiModels.length > 0 && modelInputMode === "manual" && (
+              <label className="manual-model-input">
+                手动模型名字
+                <input
+                  value={draft.apiModel}
+                  placeholder="gpt-5"
+                  onChange={(event) => setDraft({ ...draft, apiModel: event.target.value })}
+                />
+              </label>
+            )}
+            {modelFetchError ? (
+              <p className="settings-error model-fetch-status" role="alert">
+                {modelFetchError}
+              </p>
+            ) : (
+              apiModels.length > 0 && (
+                <p className="settings-backup-status model-fetch-status">
+                  已获取 {apiModels.length} 个 OpenAI 模型
+                </p>
+              )
+            )}
 
             <div className="settings-inline-grid">
               <label>
