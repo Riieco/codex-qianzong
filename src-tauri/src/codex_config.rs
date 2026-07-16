@@ -1,4 +1,6 @@
 use crate::{
+    atomic_file,
+    auth_vault::{AuthCredentialStatus, AuthVaultStore, RelayCredential, SystemAuthVault},
     error::{AppError, AppResult},
     models::{ApiSpeedMode, AppSettings, CodexAccessMode, CodexConfigBackup, ReasoningEffort},
     paths,
@@ -12,7 +14,8 @@ use std::{
 };
 use toml_edit::{value, DocumentMut, Item, Table};
 
-const RELAY_PROVIDER_ID: &str = "qianzong_relay";
+pub const SHARED_PROVIDER_ID: &str = "qianzong_unified";
+pub const LEGACY_RELAY_PROVIDER_ID: &str = "qianzong_relay";
 const OFFICIAL_MODEL: &str = "gpt-5.5";
 const DEFAULT_BACKUP_ID: &str = "default-initial";
 const DEFAULT_BACKUP_LABEL: &str = "首次启动默认配置";
@@ -29,21 +32,49 @@ struct CodexConfigBackupManifest {
 }
 
 pub fn sync_codex_config(settings: &AppSettings) -> AppResult<()> {
-    let config_path = codex_config_path()?;
-    let auth_path = codex_auth_path()?;
+    let codex_dir = paths::resolve_codex_data_dir(settings)?;
+    let config_path = codex_config_path(&codex_dir);
+    let auth_path = codex_auth_path(&codex_dir);
     let restore_path = restore_snapshot_path()?;
-    ensure_default_backup_for_paths(&config_path, &auth_path)?;
-    sync_codex_config_for_paths(settings, &config_path, &auth_path, &restore_path)
+    ensure_default_backup_for_paths(&codex_dir, &config_path, &auth_path)?;
+    let official_auth_fallback = if settings.access_mode == CodexAccessMode::Official {
+        find_official_auth_fallback(&codex_dir, &auth_path)?
+    } else {
+        None
+    };
+    sync_codex_config_for_paths(
+        settings,
+        &config_path,
+        &auth_path,
+        &restore_path,
+        &SystemAuthVault,
+        official_auth_fallback.as_ref(),
+    )
 }
 
-fn codex_config_path() -> AppResult<PathBuf> {
-    let home = dirs::home_dir().ok_or_else(|| AppError::Config("无法定位用户主目录".into()))?;
-    Ok(home.join(".codex").join("config.toml"))
+pub fn auth_credential_status() -> AppResult<AuthCredentialStatus> {
+    SystemAuthVault.status()
 }
 
-fn codex_auth_path() -> AppResult<PathBuf> {
-    let home = dirs::home_dir().ok_or_else(|| AppError::Config("无法定位用户主目录".into()))?;
-    Ok(home.join(".codex").join("auth.json"))
+pub fn clear_stored_relay_api_key() -> AppResult<AuthCredentialStatus> {
+    SystemAuthVault.clear_relay()
+}
+
+pub fn capture_current_official_auth() -> AppResult<()> {
+    let codex_dir = active_codex_data_dir()?;
+    capture_current_auth_to_vault(&codex_auth_path(&codex_dir), &SystemAuthVault)
+}
+
+fn active_codex_data_dir() -> AppResult<PathBuf> {
+    paths::resolve_codex_data_dir(&crate::settings::read_settings().unwrap_or_default())
+}
+
+fn codex_config_path(codex_dir: &Path) -> PathBuf {
+    codex_dir.join("config.toml")
+}
+
+fn codex_auth_path(codex_dir: &Path) -> PathBuf {
+    codex_dir.join("auth.json")
 }
 
 fn restore_snapshot_path() -> AppResult<PathBuf> {
@@ -59,8 +90,18 @@ fn sync_codex_config_for_paths(
     config_path: &Path,
     auth_path: &Path,
     restore_path: &Path,
+    vault: &dyn AuthVaultStore,
+    official_auth_fallback: Option<&Map<String, Value>>,
 ) -> AppResult<()> {
     let original = read_optional_text(config_path)?;
+    let original_auth = read_optional_text(auth_path)?;
+    let next_auth = prepare_codex_auth(
+        settings,
+        &original,
+        &original_auth,
+        vault,
+        official_auth_fallback,
+    )?;
 
     let next_text = match settings.access_mode {
         CodexAccessMode::Relay => {
@@ -71,7 +112,7 @@ fn sync_codex_config_for_paths(
         }
         CodexAccessMode::Official => {
             let mut doc = parse_config(&original)?;
-            apply_official_config(&mut doc);
+            apply_official_config(&mut doc, settings, !next_auth.is_empty());
             doc.to_string()
         }
     };
@@ -81,20 +122,22 @@ fn sync_codex_config_for_paths(
         write_config(config_path, &next_text)?;
     }
 
-    sync_codex_auth_for_path(settings, auth_path)?;
+    write_codex_auth_if_changed(auth_path, &original_auth, &next_auth)?;
 
     Ok(())
 }
 
 pub fn ensure_default_codex_config_backup() -> AppResult<()> {
-    let config_path = codex_config_path()?;
-    let auth_path = codex_auth_path()?;
-    ensure_default_backup_for_paths(&config_path, &auth_path)
+    let codex_dir = active_codex_data_dir()?;
+    let config_path = codex_config_path(&codex_dir);
+    let auth_path = codex_auth_path(&codex_dir);
+    ensure_default_backup_for_paths(&codex_dir, &config_path, &auth_path)
 }
 
 pub fn list_codex_config_backups() -> AppResult<Vec<CodexConfigBackup>> {
+    let codex_dir = active_codex_data_dir()?;
     ensure_default_codex_config_backup()?;
-    let mut backups = read_backup_manifests()?;
+    let mut backups = read_backup_manifests(&codex_dir)?;
     backups.sort_by(|a, b| {
         b.is_default
             .cmp(&a.is_default)
@@ -104,8 +147,9 @@ pub fn list_codex_config_backups() -> AppResult<Vec<CodexConfigBackup>> {
 }
 
 pub fn create_codex_config_backup(label: Option<String>) -> AppResult<Vec<CodexConfigBackup>> {
-    let config_path = codex_config_path()?;
-    let auth_path = codex_auth_path()?;
+    let codex_dir = active_codex_data_dir()?;
+    let config_path = codex_config_path(&codex_dir);
+    let auth_path = codex_auth_path(&codex_dir);
     let timestamp = Local::now().format("%Y%m%d%H%M%S%3f").to_string();
     let label = label
         .and_then(|value| {
@@ -117,6 +161,7 @@ pub fn create_codex_config_backup(label: Option<String>) -> AppResult<Vec<CodexC
         &format!("manual-{timestamp}"),
         &label,
         false,
+        &codex_dir,
         &config_path,
         &auth_path,
     )?;
@@ -124,10 +169,11 @@ pub fn create_codex_config_backup(label: Option<String>) -> AppResult<Vec<CodexC
 }
 
 pub fn restore_codex_config_backup(id: &str) -> AppResult<Vec<CodexConfigBackup>> {
-    let backup_dir = backup_dir_for_id(id)?;
+    let codex_dir = active_codex_data_dir()?;
+    let backup_dir = backup_dir_for_id(&codex_dir, id)?;
     let manifest = read_backup_manifest(&backup_dir)?;
-    let config_path = codex_config_path()?;
-    let auth_path = codex_auth_path()?;
+    let config_path = codex_config_path(&codex_dir);
+    let auth_path = codex_auth_path(&codex_dir);
 
     restore_snapshot_entry(
         &backup_dir.join("config.toml"),
@@ -142,11 +188,14 @@ pub fn restore_codex_config_backup(id: &str) -> AppResult<Vec<CodexConfigBackup>
         manifest.has_auth,
     )?;
 
+    capture_current_auth_to_vault(&auth_path, &SystemAuthVault)?;
+
     list_codex_config_backups()
 }
 
 pub fn delete_codex_config_backup(id: &str) -> AppResult<Vec<CodexConfigBackup>> {
-    let backup_dir = backup_dir_for_id(id)?;
+    let codex_dir = active_codex_data_dir()?;
+    let backup_dir = backup_dir_for_id(&codex_dir, id)?;
     let manifest = read_backup_manifest(&backup_dir)?;
     if manifest.is_default || manifest.id == DEFAULT_BACKUP_ID {
         return Err(AppError::Config("默认配置备份不能删除".into()));
@@ -155,8 +204,12 @@ pub fn delete_codex_config_backup(id: &str) -> AppResult<Vec<CodexConfigBackup>>
     list_codex_config_backups()
 }
 
-fn ensure_default_backup_for_paths(config_path: &Path, auth_path: &Path) -> AppResult<()> {
-    let backup_dir = backup_dir_for_id(DEFAULT_BACKUP_ID)?;
+fn ensure_default_backup_for_paths(
+    codex_dir: &Path,
+    config_path: &Path,
+    auth_path: &Path,
+) -> AppResult<()> {
+    let backup_dir = backup_dir_for_id(codex_dir, DEFAULT_BACKUP_ID)?;
     if backup_dir.join("manifest.json").exists() {
         return Ok(());
     }
@@ -164,37 +217,56 @@ fn ensure_default_backup_for_paths(config_path: &Path, auth_path: &Path) -> AppR
         DEFAULT_BACKUP_ID,
         DEFAULT_BACKUP_LABEL,
         true,
+        codex_dir,
         config_path,
         auth_path,
     )
 }
 
-fn backup_root_dir() -> AppResult<PathBuf> {
+fn backup_root_dir(codex_dir: &Path) -> AppResult<PathBuf> {
     let app_dir = paths::app_log_dir()?
         .parent()
         .map(Path::to_path_buf)
         .unwrap_or_else(|| PathBuf::from("."));
-    Ok(app_dir.join("codex-config-backups"))
+    let root = app_dir.join("codex-config-backups");
+    let default_dir = dirs::home_dir().map(|home| home.join(".codex"));
+    if default_dir
+        .as_deref()
+        .is_some_and(|path| paths::canonical_path_key(path) == paths::canonical_path_key(codex_dir))
+    {
+        Ok(root)
+    } else {
+        Ok(root.join(format!("profile-{:016x}", stable_path_hash(codex_dir))))
+    }
 }
 
-fn backup_dir_for_id(id: &str) -> AppResult<PathBuf> {
+fn stable_path_hash(path: &Path) -> u64 {
+    paths::canonical_path_key(path)
+        .bytes()
+        .fold(0xcbf29ce484222325, |hash, byte| {
+            (hash ^ u64::from(byte)).wrapping_mul(0x100000001b3)
+        })
+}
+
+fn backup_dir_for_id(codex_dir: &Path, id: &str) -> AppResult<PathBuf> {
     if !id
         .chars()
         .all(|ch| ch.is_ascii_alphanumeric() || ch == '-' || ch == '_')
     {
         return Err(AppError::Config("备份 ID 不合法".into()));
     }
-    Ok(backup_root_dir()?.join(id))
+    Ok(backup_root_dir(codex_dir)?.join(id))
 }
 
 fn create_backup_snapshot(
     id: &str,
     label: &str,
     is_default: bool,
+    codex_dir: &Path,
     config_path: &Path,
     auth_path: &Path,
 ) -> AppResult<()> {
-    let backup_dir = backup_dir_for_id(id)?;
+    let backup_dir = backup_dir_for_id(codex_dir, id)?;
     fs::create_dir_all(&backup_dir)?;
 
     let has_config = copy_if_exists(config_path, &backup_dir.join("config.toml"))?;
@@ -255,8 +327,8 @@ fn restore_snapshot_entry(
     }
 }
 
-fn read_backup_manifests() -> AppResult<Vec<CodexConfigBackup>> {
-    let root = backup_root_dir()?;
+fn read_backup_manifests(codex_dir: &Path) -> AppResult<Vec<CodexConfigBackup>> {
+    let root = backup_root_dir(codex_dir)?;
     if !root.exists() {
         return Ok(Vec::new());
     }
@@ -318,21 +390,181 @@ fn ensure_restore_snapshot(
     Ok(())
 }
 
-fn sync_codex_auth_for_path(settings: &AppSettings, auth_path: &Path) -> AppResult<()> {
-    let original = read_optional_text(auth_path)?;
-    let mut auth = parse_auth_json(&original)?;
-
-    match settings.access_mode {
-        CodexAccessMode::Relay => apply_relay_auth(&mut auth, settings)?,
-        CodexAccessMode::Official => apply_official_auth(&mut auth),
-    }
-
-    let next_text = serde_json::to_string_pretty(&Value::Object(auth))?;
+fn write_codex_auth_if_changed(
+    auth_path: &Path,
+    original: &str,
+    auth: &Map<String, Value>,
+) -> AppResult<()> {
+    let next_text = serde_json::to_string_pretty(&Value::Object(auth.clone()))?;
     if next_text != original.trim() {
-        backup_existing_file(auth_path, "auth.json")?;
+        backup_existing_auth_file(auth_path, original)?;
         write_config(auth_path, &format!("{next_text}\n"))?;
     }
 
+    Ok(())
+}
+
+fn backup_existing_auth_file(path: &Path, original: &str) -> AppResult<()> {
+    let auth = parse_auth_json(original)?;
+    if auth.get("auth_mode").and_then(Value::as_str) == Some("apikey") {
+        return Ok(());
+    }
+    backup_existing_file(path, "auth.json")
+}
+
+fn prepare_codex_auth(
+    settings: &AppSettings,
+    current_config: &str,
+    current_auth: &str,
+    vault: &dyn AuthVaultStore,
+    official_auth_fallback: Option<&Map<String, Value>>,
+) -> AppResult<Map<String, Value>> {
+    let current = parse_auth_json(current_auth)?;
+    let mut data = vault.load()?;
+    let mut vault_changed = data.capture_official_auth(&current);
+    if data.official_auth_map().is_none() {
+        if let Some(fallback) = official_auth_fallback {
+            vault_changed |= data.capture_official_auth(fallback);
+        }
+    }
+    if let (Some(endpoint), Some(api_key)) = (
+        managed_relay_endpoint(current_config),
+        current
+            .get("OPENAI_API_KEY")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|value| !value.is_empty()),
+    ) {
+        let current_relay = RelayCredential {
+            endpoint,
+            api_key: api_key.to_string(),
+        };
+        if data.relay.as_ref() != Some(&current_relay) {
+            data.relay = Some(current_relay);
+            vault_changed = true;
+        }
+    }
+
+    let next = match settings.access_mode {
+        CodexAccessMode::Relay => {
+            let endpoint = settings
+                .api_endpoint
+                .as_deref()
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .ok_or_else(|| AppError::Config("API 中转模式需要填写 API 地址".into()))?;
+            let provided_key = settings
+                .api_key
+                .as_deref()
+                .map(str::trim)
+                .filter(|value| !value.is_empty());
+
+            let key = if let Some(key) = provided_key {
+                data.relay = Some(RelayCredential {
+                    endpoint: endpoint.to_string(),
+                    api_key: key.to_string(),
+                });
+                vault_changed = true;
+                key.to_string()
+            } else if let Some(relay) = data.relay.as_ref() {
+                if relay.endpoint != endpoint {
+                    return Err(AppError::Config(
+                        "API 地址已变化，请重新输入该地址对应的 API Key".into(),
+                    ));
+                }
+                relay.api_key.clone()
+            } else if managed_relay_endpoint(current_config).as_deref() == Some(endpoint) {
+                let key = current
+                    .get("OPENAI_API_KEY")
+                    .and_then(Value::as_str)
+                    .map(str::trim)
+                    .filter(|value| !value.is_empty())
+                    .ok_or_else(|| AppError::Config("API 中转模式需要填写 API Key".into()))?;
+                data.relay = Some(RelayCredential {
+                    endpoint: endpoint.to_string(),
+                    api_key: key.to_string(),
+                });
+                vault_changed = true;
+                key.to_string()
+            } else {
+                return Err(AppError::Config("API 中转模式需要填写 API Key".into()));
+            };
+
+            Map::from_iter([
+                ("auth_mode".to_string(), Value::String("apikey".to_string())),
+                ("OPENAI_API_KEY".to_string(), Value::String(key)),
+            ])
+        }
+        CodexAccessMode::Official => {
+            let official = data.official_auth_map().or_else(|| {
+                current
+                    .get("auth_mode")
+                    .and_then(Value::as_str)
+                    .filter(|mode| *mode == "chatgpt")
+                    .map(|_| current.clone())
+            });
+            official.map_or_else(Map::new, |mut auth| {
+                auth.insert(
+                    "auth_mode".to_string(),
+                    Value::String("chatgpt".to_string()),
+                );
+                auth.insert("OPENAI_API_KEY".to_string(), Value::Null);
+                auth
+            })
+        }
+    };
+
+    if vault_changed {
+        vault.save(&data)?;
+    }
+    Ok(next)
+}
+
+fn find_official_auth_fallback(
+    codex_dir: &Path,
+    auth_path: &Path,
+) -> AppResult<Option<Map<String, Value>>> {
+    let mut candidates = vec![backup_dir_for_id(codex_dir, DEFAULT_BACKUP_ID)?.join("auth.json")];
+    if let Ok(entries) = fs::read_dir(codex_dir) {
+        let mut automatic = entries
+            .flatten()
+            .map(|entry| entry.path())
+            .filter(|path| {
+                path.file_name()
+                    .and_then(|name| name.to_str())
+                    .is_some_and(|name| name.starts_with("auth.json.qianzong-backup-"))
+            })
+            .collect::<Vec<_>>();
+        automatic.sort_by(|a, b| b.file_name().cmp(&a.file_name()));
+        candidates.extend(automatic);
+    }
+
+    for path in candidates {
+        if path == auth_path || !path.is_file() {
+            continue;
+        }
+        if let Some(auth) = read_official_auth_candidate(&path) {
+            return Ok(Some(auth));
+        }
+    }
+    Ok(None)
+}
+
+fn read_official_auth_candidate(path: &Path) -> Option<Map<String, Value>> {
+    let text = fs::read_to_string(path).ok()?;
+    let auth = parse_auth_json(&text).ok()?;
+    let mut data = crate::auth_vault::AuthVaultData::default();
+    data.capture_official_auth(&auth)
+        .then(|| data.official_auth_map())
+        .flatten()
+}
+
+fn capture_current_auth_to_vault(auth_path: &Path, vault: &dyn AuthVaultStore) -> AppResult<()> {
+    let current = parse_auth_json(&read_optional_text(auth_path)?)?;
+    let mut data = vault.load()?;
+    if data.capture_official_auth(&current) {
+        vault.save(&data)?;
+    }
     Ok(())
 }
 
@@ -348,35 +580,6 @@ fn parse_auth_json(text: &str) -> AppResult<Map<String, Value>> {
         .ok_or_else(|| AppError::Config("Codex 认证文件必须是 JSON 对象".into()))
 }
 
-fn apply_relay_auth(auth: &mut Map<String, Value>, settings: &AppSettings) -> AppResult<()> {
-    let existing_key = auth
-        .get("OPENAI_API_KEY")
-        .and_then(Value::as_str)
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-        .map(str::to_string);
-    let next_key = settings
-        .api_key
-        .as_deref()
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-        .map(str::to_string)
-        .or(existing_key)
-        .ok_or_else(|| AppError::Config("API 中转模式需要填写 API Key".into()))?;
-
-    auth.insert("auth_mode".to_string(), Value::String("apikey".to_string()));
-    auth.insert("OPENAI_API_KEY".to_string(), Value::String(next_key));
-    Ok(())
-}
-
-fn apply_official_auth(auth: &mut Map<String, Value>) {
-    auth.insert(
-        "auth_mode".to_string(),
-        Value::String("chatgpt".to_string()),
-    );
-    auth.insert("OPENAI_API_KEY".to_string(), Value::Null);
-}
-
 fn backup_existing_file(path: &Path, base_name: &str) -> AppResult<()> {
     if !path.exists() {
         return Ok(());
@@ -389,11 +592,7 @@ fn backup_existing_file(path: &Path, base_name: &str) -> AppResult<()> {
 }
 
 fn write_config(config_path: &Path, text: &str) -> AppResult<()> {
-    if let Some(parent) = config_path.parent() {
-        fs::create_dir_all(parent)?;
-    }
-    fs::write(config_path, text)?;
-    Ok(())
+    atomic_file::write(config_path, text.as_bytes()).map_err(Into::into)
 }
 
 fn apply_relay_config(doc: &mut DocumentMut, settings: &AppSettings) -> AppResult<()> {
@@ -406,7 +605,12 @@ fn apply_relay_config(doc: &mut DocumentMut, settings: &AppSettings) -> AppResul
     let model = settings.api_model.trim();
 
     doc["model"] = value(if model.is_empty() { "gpt-5" } else { model });
-    doc["model_provider"] = value(RELAY_PROVIDER_ID);
+    let provider_id = if settings.unify_codex_session_history {
+        SHARED_PROVIDER_ID
+    } else {
+        LEGACY_RELAY_PROVIDER_ID
+    };
+    doc["model_provider"] = value(provider_id);
     doc["preferred_auth_method"] = value("apikey");
     doc["model_reasoning_effort"] = value(reasoning_effort_value(&settings.reasoning_effort));
 
@@ -419,31 +623,59 @@ fn apply_relay_config(doc: &mut DocumentMut, settings: &AppSettings) -> AppResul
         }
     }
 
-    let relay = ensure_relay_provider_table(doc)?;
-    relay.insert("name", value(RELAY_PROVIDER_ID));
+    let relay = ensure_managed_provider_table(doc, provider_id)?;
+    relay.clear();
+    relay.insert("name", value(provider_id));
     relay.insert("base_url", value(endpoint));
     relay.insert("wire_api", value("responses"));
     Ok(())
 }
 
-fn apply_official_config(doc: &mut DocumentMut) {
+fn apply_official_config(doc: &mut DocumentMut, settings: &AppSettings, has_official_auth: bool) {
     let root = doc.as_table_mut();
-    root.remove("model_provider");
     root.remove("openai_base_url");
     root.remove("service_tier");
     root.insert("model", value(OFFICIAL_MODEL));
     root.insert("model_reasoning_effort", value("medium"));
     root.insert("preferred_auth_method", value("chatgpt"));
 
-    if let Some(Item::Table(providers)) = root.get_mut("model_providers") {
-        providers.remove(RELAY_PROVIDER_ID);
-        if providers.is_empty() {
+    if settings.unify_codex_session_history && has_official_auth {
+        root.insert("model_provider", value(SHARED_PROVIDER_ID));
+        if !matches!(root.get("model_providers"), Some(Item::Table(_))) {
+            root.insert("model_providers", Item::Table(Table::new()));
+        }
+        let providers = root
+            .get_mut("model_providers")
+            .and_then(Item::as_table_mut)
+            .expect("model_providers was initialized as a table");
+        providers.remove(LEGACY_RELAY_PROVIDER_ID);
+        let mut official = Table::new();
+        official.insert("name", value("OpenAI"));
+        official.insert("requires_openai_auth", value(true));
+        official.insert("supports_websockets", value(true));
+        official.insert("wire_api", value("responses"));
+        providers.insert(SHARED_PROVIDER_ID, Item::Table(official));
+    } else {
+        root.insert("model_provider", value("openai"));
+        let providers_empty = root
+            .get_mut("model_providers")
+            .and_then(Item::as_table_mut)
+            .map(|providers| {
+                providers.remove(LEGACY_RELAY_PROVIDER_ID);
+                providers.remove(SHARED_PROVIDER_ID);
+                providers.is_empty()
+            })
+            .unwrap_or(false);
+        if providers_empty {
             root.remove("model_providers");
         }
     }
 }
 
-fn ensure_relay_provider_table(doc: &mut DocumentMut) -> AppResult<&mut Table> {
+fn ensure_managed_provider_table<'a>(
+    doc: &'a mut DocumentMut,
+    provider_id: &str,
+) -> AppResult<&'a mut Table> {
     let root = doc.as_table_mut();
     if !matches!(root.get("model_providers"), Some(Item::Table(_))) {
         root.insert("model_providers", Item::Table(Table::new()));
@@ -452,13 +684,34 @@ fn ensure_relay_provider_table(doc: &mut DocumentMut) -> AppResult<&mut Table> {
         .get_mut("model_providers")
         .and_then(Item::as_table_mut)
         .ok_or_else(|| AppError::Config("无法写入 Codex provider 配置".into()))?;
-    if !matches!(providers.get(RELAY_PROVIDER_ID), Some(Item::Table(_))) {
-        providers.insert(RELAY_PROVIDER_ID, Item::Table(Table::new()));
+    let other_id = if provider_id == SHARED_PROVIDER_ID {
+        LEGACY_RELAY_PROVIDER_ID
+    } else {
+        SHARED_PROVIDER_ID
+    };
+    providers.remove(other_id);
+    if !matches!(providers.get(provider_id), Some(Item::Table(_))) {
+        providers.insert(provider_id, Item::Table(Table::new()));
     }
     providers
-        .get_mut(RELAY_PROVIDER_ID)
+        .get_mut(provider_id)
         .and_then(Item::as_table_mut)
         .ok_or_else(|| AppError::Config("无法写入 API 中转 provider 配置".into()))
+}
+
+fn managed_relay_endpoint(text: &str) -> Option<String> {
+    let doc = text.parse::<DocumentMut>().ok()?;
+    let provider_id = doc.get("model_provider")?.as_str()?;
+    if provider_id != SHARED_PROVIDER_ID && provider_id != LEGACY_RELAY_PROVIDER_ID {
+        return None;
+    }
+    doc.get("model_providers")?
+        .as_table()?
+        .get(provider_id)?
+        .as_table()?
+        .get("base_url")?
+        .as_str()
+        .map(str::to_string)
 }
 
 fn reasoning_effort_value(effort: &ReasoningEffort) -> &'static str {
@@ -477,26 +730,47 @@ fn is_qianzong_managed(text: &str) -> bool {
             .get("model_provider")
             .and_then(Item::as_value)
             .and_then(|item| item.as_str())
-            == Some(RELAY_PROVIDER_ID)
+            .is_some_and(|id| id == SHARED_PROVIDER_ID || id == LEGACY_RELAY_PROVIDER_ID)
         {
             return true;
         }
         if root
             .get("model_providers")
             .and_then(Item::as_table)
-            .and_then(|providers| providers.get(RELAY_PROVIDER_ID))
-            .is_some()
+            .is_some_and(|providers| {
+                providers.contains_key(SHARED_PROVIDER_ID)
+                    || providers.contains_key(LEGACY_RELAY_PROVIDER_ID)
+            })
         {
             return true;
         }
     }
-    text.contains("model_provider = \"qianzong_relay\"")
+    text.contains("model_provider = \"qianzong_unified\"")
+        || text.contains("[model_providers.qianzong_unified]")
+        || text.contains("model_provider = \"qianzong_relay\"")
         || text.contains("[model_providers.qianzong_relay]")
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::auth_vault::MemoryAuthVault;
+
+    fn sync_test(
+        settings: &AppSettings,
+        config_path: &Path,
+        auth_path: &Path,
+        restore_path: &Path,
+    ) -> AppResult<()> {
+        sync_codex_config_for_paths(
+            settings,
+            config_path,
+            auth_path,
+            restore_path,
+            &MemoryAuthVault::default(),
+            None,
+        )
+    }
 
     #[test]
     fn relay_sync_writes_custom_provider_and_restore_snapshot() {
@@ -519,16 +793,17 @@ preferred_auth_method = "chatgpt"
         settings.api_model = "gpt-5.4".into();
         settings.reasoning_effort = ReasoningEffort::Extreme;
         settings.speed_mode = ApiSpeedMode::Fast;
+        settings.unify_codex_session_history = true;
 
-        sync_codex_config_for_paths(&settings, &config_path, &auth_path, &restore_path).unwrap();
+        sync_test(&settings, &config_path, &auth_path, &restore_path).unwrap();
 
         let text = fs::read_to_string(&config_path).unwrap();
         assert!(text.contains(r#"model = "gpt-5.4""#));
-        assert!(text.contains(r#"model_provider = "qianzong_relay""#));
+        assert!(text.contains(r#"model_provider = "qianzong_unified""#));
         assert!(text.contains(r#"preferred_auth_method = "apikey""#));
         assert!(text.contains(r#"model_reasoning_effort = "xhigh""#));
         assert!(text.contains(r#"service_tier = "priority""#));
-        assert!(text.contains(r#"[model_providers.qianzong_relay]"#));
+        assert!(text.contains(r#"[model_providers.qianzong_unified]"#));
         assert!(text.contains(r#"base_url = "https://api.example.com/v1""#));
         assert!(text.contains(r#"wire_api = "responses""#));
 
@@ -586,14 +861,18 @@ command = "stale"
             &auth_path,
             r#"{
   "auth_mode": "apikey",
-  "OPENAI_API_KEY": "sk-test"
+  "OPENAI_API_KEY": "sk-test",
+  "tokens": { "access_token": "access", "refresh_token": "refresh" }
 }
 "#,
         )
         .unwrap();
 
-        let settings = AppSettings::default();
-        sync_codex_config_for_paths(&settings, &config_path, &auth_path, &restore_path).unwrap();
+        let settings = AppSettings {
+            unify_codex_session_history: true,
+            ..AppSettings::default()
+        };
+        sync_test(&settings, &config_path, &auth_path, &restore_path).unwrap();
 
         let text = fs::read_to_string(&config_path).unwrap();
         assert!(text.contains(r#"model = "gpt-5.5""#));
@@ -605,7 +884,9 @@ command = "stale"
         assert!(!text.contains("stale_restore"));
         assert!(!text.contains("service_tier"));
         assert!(!text.contains("qianzong_relay"));
-        assert!(!text.contains("model_provider"));
+        assert!(text.contains(r#"model_provider = "qianzong_unified""#));
+        assert!(text.contains(r#"[model_providers.qianzong_unified]"#));
+        assert!(text.contains(r#"requires_openai_auth = true"#));
         let auth = fs::read_to_string(&auth_path).unwrap();
         assert!(auth.contains(r#""auth_mode": "chatgpt""#));
         assert!(auth.contains(r#""OPENAI_API_KEY": null"#));
@@ -637,7 +918,7 @@ service_tier = "priority"
         .unwrap();
 
         let settings = AppSettings::default();
-        sync_codex_config_for_paths(&settings, &config_path, &auth_path, &restore_path).unwrap();
+        sync_test(&settings, &config_path, &auth_path, &restore_path).unwrap();
 
         let text = fs::read_to_string(&config_path).unwrap();
         assert!(text.contains(r#"preferred_auth_method = "chatgpt""#));
@@ -648,13 +929,83 @@ service_tier = "priority"
     }
 
     #[test]
+    fn official_sync_without_saved_login_returns_to_login_ready_state() {
+        let temp = tempfile::tempdir().unwrap();
+        let config_path = temp.path().join("config.toml");
+        let auth_path = temp.path().join("auth.json");
+        let restore_path = temp.path().join("restore.toml");
+        fs::write(
+            &config_path,
+            r#"model_provider = "qianzong_relay"
+preferred_auth_method = "apikey"
+
+[model_providers.qianzong_relay]
+base_url = "https://api.example.com/v1"
+wire_api = "responses"
+"#,
+        )
+        .unwrap();
+        fs::write(
+            &auth_path,
+            r#"{"auth_mode":"apikey","OPENAI_API_KEY":"sk-relay"}"#,
+        )
+        .unwrap();
+
+        let vault = MemoryAuthVault::default();
+        let login_ready_settings = AppSettings {
+            unify_codex_session_history: true,
+            ..AppSettings::default()
+        };
+        sync_codex_config_for_paths(
+            &login_ready_settings,
+            &config_path,
+            &auth_path,
+            &restore_path,
+            &vault,
+            None,
+        )
+        .unwrap();
+
+        let config = fs::read_to_string(config_path).unwrap();
+        assert!(config.contains(r#"model_provider = "openai""#));
+        assert!(config.contains(r#"preferred_auth_method = "chatgpt""#));
+        assert!(!config.contains("qianzong_relay"));
+        assert!(!config.contains("qianzong_unified"));
+        assert_eq!(fs::read_to_string(auth_path).unwrap(), "{}\n");
+        assert!(!temp.path().read_dir().unwrap().any(|entry| entry
+            .unwrap()
+            .file_name()
+            .to_string_lossy()
+            .starts_with("auth.json.qianzong-backup-")));
+
+        let relay = AppSettings {
+            access_mode: CodexAccessMode::Relay,
+            api_endpoint: Some("https://api.example.com/v1".into()),
+            api_key: None,
+            ..AppSettings::default()
+        };
+        sync_codex_config_for_paths(
+            &relay,
+            &temp.path().join("config.toml"),
+            &temp.path().join("auth.json"),
+            &restore_path,
+            &vault,
+            None,
+        )
+        .unwrap();
+        assert!(fs::read_to_string(temp.path().join("auth.json"))
+            .unwrap()
+            .contains(r#""OPENAI_API_KEY": "sk-relay""#));
+    }
+
+    #[test]
     fn relay_sync_requires_endpoint() {
         let temp = tempfile::tempdir().unwrap();
         let mut settings = AppSettings::default();
         settings.access_mode = CodexAccessMode::Relay;
         settings.api_endpoint = None;
 
-        let err = sync_codex_config_for_paths(
+        let err = sync_test(
             &settings,
             &temp.path().join("config.toml"),
             &temp.path().join("auth.json"),
@@ -672,7 +1023,7 @@ service_tier = "priority"
         settings.access_mode = CodexAccessMode::Relay;
         settings.api_endpoint = Some("https://api.example.com/v1".into());
 
-        let err = sync_codex_config_for_paths(
+        let err = sync_test(
             &settings,
             &temp.path().join("config.toml"),
             &temp.path().join("auth.json"),
@@ -688,6 +1039,14 @@ service_tier = "priority"
         let temp = tempfile::tempdir().unwrap();
         let auth_path = temp.path().join("auth.json");
         fs::write(
+            temp.path().join("config.toml"),
+            r#"model_provider = "qianzong_relay"
+[model_providers.qianzong_relay]
+base_url = "https://api.example.com/v1"
+"#,
+        )
+        .unwrap();
+        fs::write(
             &auth_path,
             r#"{
   "auth_mode": "apikey",
@@ -700,7 +1059,7 @@ service_tier = "priority"
         settings.access_mode = CodexAccessMode::Relay;
         settings.api_endpoint = Some("https://api.example.com/v1".into());
 
-        sync_codex_config_for_paths(
+        sync_test(
             &settings,
             &temp.path().join("config.toml"),
             &auth_path,
@@ -710,6 +1069,155 @@ service_tier = "priority"
 
         let auth = fs::read_to_string(&auth_path).unwrap();
         assert!(auth.contains(r#""OPENAI_API_KEY": "sk-existing""#));
+    }
+
+    #[test]
+    fn relay_sync_requires_new_key_when_endpoint_changes() {
+        let temp = tempfile::tempdir().unwrap();
+        let config_path = temp.path().join("config.toml");
+        let auth_path = temp.path().join("auth.json");
+        let restore_path = temp.path().join("restore.toml");
+        let vault = MemoryAuthVault::default();
+        let first = AppSettings {
+            access_mode: CodexAccessMode::Relay,
+            api_endpoint: Some("https://first.example.com/v1".into()),
+            api_key: Some("sk-first".into()),
+            ..AppSettings::default()
+        };
+        sync_codex_config_for_paths(
+            &first,
+            &config_path,
+            &auth_path,
+            &restore_path,
+            &vault,
+            None,
+        )
+        .unwrap();
+
+        let changed = AppSettings {
+            api_endpoint: Some("https://second.example.com/v1".into()),
+            api_key: None,
+            ..first
+        };
+        let err = sync_codex_config_for_paths(
+            &changed,
+            &config_path,
+            &auth_path,
+            &restore_path,
+            &vault,
+            None,
+        )
+        .unwrap_err();
+
+        assert!(err.to_string().contains("API 地址已变化"));
+        assert_eq!(
+            vault.snapshot().relay.unwrap().endpoint,
+            "https://first.example.com/v1"
+        );
+    }
+
+    #[test]
+    fn official_and_relay_credentials_round_trip_through_vault() {
+        let temp = tempfile::tempdir().unwrap();
+        let config_path = temp.path().join("config.toml");
+        let auth_path = temp.path().join("auth.json");
+        let restore_path = temp.path().join("restore.toml");
+        fs::write(&config_path, "model = \"gpt-5.5\"\n").unwrap();
+        fs::write(
+            &auth_path,
+            r#"{
+  "auth_mode": "chatgpt",
+  "OPENAI_API_KEY": null,
+  "tokens": { "access_token": "access", "refresh_token": "refresh" },
+  "account_id": "acct"
+}
+"#,
+        )
+        .unwrap();
+        let vault = MemoryAuthVault::default();
+        let relay = AppSettings {
+            access_mode: CodexAccessMode::Relay,
+            api_endpoint: Some("https://api.example.com/v1".into()),
+            api_key: Some("sk-relay".into()),
+            unify_codex_session_history: true,
+            ..AppSettings::default()
+        };
+        sync_codex_config_for_paths(
+            &relay,
+            &config_path,
+            &auth_path,
+            &restore_path,
+            &vault,
+            None,
+        )
+        .unwrap();
+        let relay_auth = fs::read_to_string(&auth_path).unwrap();
+        assert!(relay_auth.contains(r#""OPENAI_API_KEY": "sk-relay""#));
+        assert!(!relay_auth.contains("refresh_token"));
+        assert!(vault.snapshot().status().has_stored_official_auth);
+        assert!(vault.snapshot().status().has_stored_relay_api_key);
+
+        let official = AppSettings {
+            access_mode: CodexAccessMode::Official,
+            unify_codex_session_history: true,
+            ..relay
+        };
+        sync_codex_config_for_paths(
+            &official,
+            &config_path,
+            &auth_path,
+            &restore_path,
+            &vault,
+            None,
+        )
+        .unwrap();
+        let official_auth = fs::read_to_string(&auth_path).unwrap();
+        assert!(official_auth.contains(r#""auth_mode": "chatgpt""#));
+        assert!(official_auth.contains(r#""refresh_token": "refresh""#));
+        assert!(official_auth.contains(r#""account_id": "acct""#));
+        assert!(official_auth.contains(r#""OPENAI_API_KEY": null"#));
+    }
+
+    #[test]
+    fn official_mode_recovers_auth_from_backup_when_vault_is_empty() {
+        let vault = MemoryAuthVault::default();
+        let fallback = serde_json::json!({
+            "auth_mode": "chatgpt",
+            "tokens": {
+                "access_token": "access",
+                "refresh_token": "refresh",
+                "account_id": "acct"
+            },
+            "last_refresh": "2026-07-16T00:00:00Z"
+        })
+        .as_object()
+        .unwrap()
+        .clone();
+        let settings = AppSettings {
+            access_mode: CodexAccessMode::Official,
+            ..AppSettings::default()
+        };
+
+        let restored = prepare_codex_auth(
+            &settings,
+            r#"model_provider = "qianzong_relay""#,
+            r#"{"auth_mode":"apikey","OPENAI_API_KEY":"sk-relay"}"#,
+            &vault,
+            Some(&fallback),
+        )
+        .unwrap();
+
+        assert_eq!(
+            restored.get("auth_mode").and_then(Value::as_str),
+            Some("chatgpt")
+        );
+        assert_eq!(
+            Value::Object(restored.clone())
+                .pointer("/tokens/refresh_token")
+                .and_then(Value::as_str),
+            Some("refresh")
+        );
+        assert!(vault.snapshot().status().has_stored_official_auth);
     }
 
     #[test]
@@ -736,7 +1244,7 @@ service_tier = "priority"
 
     #[test]
     fn backup_id_validation_rejects_path_traversal() {
-        let err = backup_dir_for_id("../manual").unwrap_err();
+        let err = backup_dir_for_id(Path::new("/tmp/.codex"), "../manual").unwrap_err();
         assert!(err.to_string().contains("备份 ID 不合法"));
     }
 

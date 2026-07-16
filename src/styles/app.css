@@ -27,28 +27,55 @@ button {
 }
 
 .app-shell {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
   width: 100vw;
   height: 100vh;
   min-width: 760px;
   min-height: 560px;
-  padding: 18px;
-  overflow: auto;
+  padding: 0;
+  overflow: hidden;
   background:
     linear-gradient(135deg, rgba(40, 102, 247, 0.14), rgba(161, 149, 244, 0.1)),
     var(--surface-window);
-  border: 1px solid var(--stroke-subtle);
+  border: 0;
   border-radius: var(--radius-window);
-  box-shadow: var(--shadow-window);
+  box-shadow: none;
   backdrop-filter: blur(22px) saturate(1.2);
 }
 
 .header-bar {
+  position: relative;
+  z-index: 8;
+  flex: 0 0 auto;
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 16px;
-  margin-bottom: 14px;
-  cursor: move;
+  margin: 0;
+  padding: 16px 18px 12px;
+  border-bottom: 1px solid var(--stroke-subtle);
+  background: var(--surface-header);
+  box-shadow: 0 8px 24px rgba(20, 28, 48, 0.08);
+  cursor: default;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.app-content-scroll {
+  flex: 1 1 auto;
+  min-height: 0;
+  padding: 0 18px 18px;
+  overflow: auto;
+  scrollbar-width: none;
+}
+
+.app-content-scroll::-webkit-scrollbar,
+.settings-drawer::-webkit-scrollbar {
+  display: none;
+  width: 0;
+  height: 0;
 }
 
 .brand-lockup,
@@ -811,8 +838,9 @@ h1 {
   bottom: 18px;
   z-index: 10;
   width: min(390px, calc(100vw - 36px));
-  padding: 16px;
+  padding: 0 16px 16px;
   overflow: auto;
+  scrollbar-width: none;
   border: 1px solid var(--stroke-subtle);
   border-radius: 18px;
   background: var(--surface-window);
@@ -821,9 +849,16 @@ h1 {
 }
 
 .drawer-header {
+  position: sticky;
+  top: 0;
+  z-index: 3;
   justify-content: space-between;
   gap: 12px;
-  margin-bottom: 16px;
+  margin: 0 -16px 16px;
+  padding: 14px 16px 12px;
+  border-bottom: 1px solid var(--stroke-subtle);
+  background: var(--surface-header);
+  box-shadow: 0 8px 20px rgba(20, 28, 48, 0.08);
 }
 
 .settings-drawer label {
@@ -856,6 +891,38 @@ h1 {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 10px;
+}
+
+.model-picker-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: end;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.model-picker-row label {
+  margin-bottom: 0;
+}
+
+.model-fetch-button {
+  height: 36px;
+  padding: 0 10px;
+  white-space: nowrap;
+}
+
+.model-fetch-status {
+  margin: -3px 0 12px;
+}
+
+.spin {
+  animation: spin 0.9s linear infinite;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
 }
 
 .config-backup-panel {
@@ -927,13 +994,29 @@ h1 {
 .toggle-row {
   justify-content: space-between;
   gap: 12px;
+  margin-bottom: 12px;
 }
 
 .toggle-row label {
-  display: flex;
+  display: inline-flex;
   grid-template-columns: none;
   align-items: center;
-  gap: 8px;
+  gap: 6px;
+  min-width: 0;
+  margin-bottom: 0;
+  font-size: 11px;
+  line-height: 1.2;
+  white-space: nowrap;
+}
+
+.settings-drawer .toggle-row input[type="checkbox"] {
+  flex: 0 0 16px;
+  width: 16px;
+  min-width: 16px;
+  height: 16px;
+  margin: 0;
+  padding: 0;
+  border-radius: 4px;
 }
 
 .path-summary {
@@ -941,6 +1024,48 @@ h1 {
   gap: 5px;
   padding: 10px;
   word-break: break-all;
+}
+
+.credential-summary {
+  grid-template-columns: auto auto minmax(0, 1fr);
+  align-items: center;
+  gap: 6px;
+  padding: 7px 9px;
+  word-break: normal;
+}
+
+.credential-summary strong {
+  font-size: 12px;
+  line-height: 1.2;
+}
+
+.credential-summary span {
+  min-width: 0;
+  font-size: 10px;
+  line-height: 1.2;
+  text-align: right;
+  white-space: nowrap;
+}
+
+.history-toggle-row {
+  flex-wrap: nowrap;
+  justify-content: flex-start;
+  margin: 0 0 10px;
+}
+
+.history-settings-block {
+  margin: 16px 0 12px;
+  padding: 12px 0;
+  border-top: 1px solid var(--stroke-subtle);
+  border-bottom: 1px solid var(--stroke-subtle);
+}
+
+.history-settings-block .settings-hint {
+  margin: 0;
+}
+
+.history-settings-block .quiet-button {
+  margin-top: 10px;
 }
 
 .drawer-actions {
@@ -1005,8 +1130,12 @@ h1 {
 }
 
 @media (max-width: 860px) {
+  .app-content-scroll {
+    padding: 0 14px 14px;
+  }
+
   .app-shell {
-    padding: 14px;
+    gap: 12px;
   }
 
   .dashboard-grid,
@@ -1025,6 +1154,7 @@ h1 {
 
   .header-bar {
     align-items: flex-start;
+    padding: 14px;
   }
 
   .header-status {

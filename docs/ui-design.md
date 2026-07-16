@@ -51,10 +51,15 @@ The first screen is the product. There is no landing page. The dashboard is opti
 - The login card settings button opens the same settings drawer; access settings are grouped near the top of the drawer.
 - The settings drawer header should stay compact. Do not show the old explanatory subtitle `接入方式、路径、刷新频率、主题与任务看板行为`.
 - The access settings section shows managed Codex config backup controls above `当前模式`: a backup dropdown, then `保存备份`, `恢复备份`, and `删除备份` in one row. The first app startup automatically creates the default backup so users can recover the original Codex config/auth state after later access-mode edits; deleting is disabled for the default backup.
-- Official native mode shows only the mode selector and official-mode hint. Relay-only fields are hidden and reset on save because official mode uses Codex defaults.
-- API relay mode shows API address, API Key, model name, reasoning effort, and speed strategy. The API address input accepts a base URL and normalizes it to exactly one trailing `/v1` when edited or saved. API Key is a password input; it is used for Codex `auth.json` sync and is not read back into the UI. API relay dashboard statistics are local because some users work without official login.
+- The access section shows sanitized credential state: whether the complete official login and relay Key are safely stored. Raw tokens and API Keys are never returned to the UI.
+- Official native mode hides relay-only fields but preserves their non-secret values for the next switch. Saving restores the previously captured official login instead of requiring a new login.
+- API relay mode shows API address, API Key, model name, reasoning effort, and speed strategy. The API address input accepts a base URL and normalizes it to exactly one trailing `/v1` when edited or saved. API Key is a password input; when a Key is already saved for the same endpoint, the field can remain empty. The user can explicitly clear the saved Key. API relay dashboard statistics are local because some users work without official login.
+- `统一 Codex 会话历史` is an explicit, default-off toggle. A nested option controls one-time migration of existing sessions. After unified mode is disabled, the restore action appears only when a compatible migration backup ledger exists.
 - The settings drawer save button must persist settings, close the drawer on success, and keep the drawer open with an inline error on failure. The drawer must not show a log button.
-- The borderless title bar includes icon-only refresh, settings, minimize, and close controls.
+- The borderless title bar includes icon-only refresh, settings, minimize, and close controls. Double-clicking it must not maximize the application.
+- The main title bar is an opaque fixed-height block outside the dashboard scroll container, with a persistent gap before scrolling content. The settings drawer is a viewport-level overlay with its own opaque sticky header; scrolling either surface must not move or reveal content through its header.
+- Dashboard-content and settings-drawer scrollbars are visually hidden while wheel, touchpad, and keyboard scrolling remain enabled.
+- The application window and settings drawer use opaque theme surfaces so desktop content never shows through; the main light surface keeps the restrained blue/lilac overlay above its white-gray base.
 - The visible full-width board under the trend/login row is the Skills board, not the old task board. It is implemented under `src/features/skills-board/`, uses a left skill list and right description pane, and all text/actions remain Chinese.
 - Skills board shows only skill names, source/status, paths, and descriptions. It must not render full `SKILL.md` bodies. Delete/disable actions are disabled for system, plugin, protected, and already-disabled skills.
 - Skills board search area includes status filters: `全部`, `已启用`, and `已禁用`. Disabled skills from `.codex/skills-disabled` must appear under `已禁用`, expose an enable action, and return to the enabled list after enabling. Disable and enable actions are reversible and run without a blocking browser confirmation dialog. Disabling keeps the current filter in place. Skill state buttons use green for currently enabled skills and red for currently disabled skills so mixed lists are easy to scan.
@@ -92,8 +97,7 @@ Tokens live in `src/styles/tokens.css`:
 
 ## Responsive Rules
 
-- Default window: `930x760`
-- Minimum window: `760x560`
+- Window size is fixed at `930x760`; resizing, maximizing, and fullscreen are disabled.
 - Below `860px`, dashboard regions collapse to one column.
 - Text inside task cards clamps instead of overlapping.
 - Diagnostic paths truncate with ellipsis.

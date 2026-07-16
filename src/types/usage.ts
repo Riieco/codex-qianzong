@@ -153,6 +153,20 @@ export interface AppSettings {
   reasoningEffort: ReasoningEffort;
   speedMode: ApiSpeedMode;
   membershipStartedOn?: string | null;
+  unifyCodexSessionHistory: boolean;
+  unifyCodexMigrateExisting: boolean;
+}
+
+export interface AuthCredentialStatus {
+  hasStoredOfficialAuth: boolean;
+  hasStoredRelayApiKey: boolean;
+  relayEndpoint?: string | null;
+}
+
+export interface HistoryRestoreOutcome {
+  restoredJsonlFiles: number;
+  restoredStateRows: number;
+  skippedReason?: string | null;
 }
 
 export interface DetectionPaths {

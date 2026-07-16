@@ -34,6 +34,8 @@ export const defaultSettings: AppSettings = {
   reasoningEffort: "medium",
   speedMode: "balanced",
   membershipStartedOn: null,
+  unifyCodexSessionHistory: false,
+  unifyCodexMigrateExisting: false,
 };
 
 export const mockSnapshot: UsageSnapshot = {

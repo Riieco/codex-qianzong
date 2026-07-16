@@ -344,6 +344,8 @@ pub struct AppSettings {
     pub reasoning_effort: ReasoningEffort,
     pub speed_mode: ApiSpeedMode,
     pub membership_started_on: Option<String>,
+    pub unify_codex_session_history: bool,
+    pub unify_codex_migrate_existing: bool,
 }
 
 impl Default for AppSettings {
@@ -364,6 +366,8 @@ impl Default for AppSettings {
             reasoning_effort: ReasoningEffort::Medium,
             speed_mode: ApiSpeedMode::Balanced,
             membership_started_on: None,
+            unify_codex_session_history: false,
+            unify_codex_migrate_existing: false,
         }
     }
 }

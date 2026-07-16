@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { getAppSettings, getUsageSnapshot, saveAppSettings, setAlwaysOnTop } from "./lib/api";
 import { selectDashboardData } from "./lib/dashboardData";
+import { formatError } from "./lib/errors";
 import { defaultSettings } from "./lib/mock";
 import type { AppSettings, UsageSnapshot } from "./types/usage";
 import { EnvironmentPanel } from "./components/EnvironmentPanel";
@@ -28,7 +29,7 @@ export function App() {
     try {
       setSnapshot(await getUsageSnapshot());
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
+      setError(formatError(err));
     } finally {
       setIsRefreshing(false);
     }
@@ -41,7 +42,7 @@ export function App() {
     try {
       await setAlwaysOnTop(saved.alwaysOnTop);
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
+      setError(formatError(err));
     }
     void refresh();
   }
@@ -66,39 +67,46 @@ export function App() {
   const dashboardData = selectDashboardData(snapshot, settings.accessMode);
 
   return (
-    <main className="app-shell">
-      <HeaderBar
-        snapshot={snapshot}
-        isRefreshing={isRefreshing}
-        onRefresh={() => void refresh()}
-        onOpenSettings={() => setSettingsOpen(true)}
-      />
-      <section className="dashboard-grid" aria-busy={isRefreshing}>
-        <QuotaPanel
+    <>
+      <main className="app-shell">
+        <HeaderBar
           snapshot={snapshot}
-          isLoading={!snapshot && isRefreshing}
-          accessMode={settings.accessMode}
+          isRefreshing={isRefreshing}
+          onRefresh={() => void refresh()}
+          onOpenSettings={() => setSettingsOpen(true)}
         />
-        <TokenValuePanel
-          usage={dashboardData.tokenUsage}
-          valuePeriodUsage={dashboardData.valuePeriodUsage}
-          isLoading={!snapshot}
-          sourceLabel={dashboardData.tokenSourceLabel}
-        />
-        <TrendPanel
-          buckets={dashboardData.trendBuckets}
-          isLoading={!snapshot}
-          sourceLabel={dashboardData.trendSourceLabel}
-          onOpenDetail={() => setTrendDetailOpen(true)}
-        />
-        <LoginStatusCard snapshot={snapshot} settings={settings} />
-        <SkillsBoard enabled={settings.showTaskBoard} />
-        <EnvironmentPanel diagnostics={snapshot?.diagnostics ?? []} isPartial={hasPartialData} />
-      </section>
-      <ErrorDisclosure
-        title="运行消息"
-        messages={[...(snapshot?.messages ?? []), error].filter(Boolean) as string[]}
-      />
+        <div className="app-content-scroll">
+          <section className="dashboard-grid" aria-busy={isRefreshing}>
+            <QuotaPanel
+              snapshot={snapshot}
+              isLoading={!snapshot && isRefreshing}
+              accessMode={settings.accessMode}
+            />
+            <TokenValuePanel
+              usage={dashboardData.tokenUsage}
+              valuePeriodUsage={dashboardData.valuePeriodUsage}
+              isLoading={!snapshot}
+              sourceLabel={dashboardData.tokenSourceLabel}
+            />
+            <TrendPanel
+              buckets={dashboardData.trendBuckets}
+              isLoading={!snapshot}
+              sourceLabel={dashboardData.trendSourceLabel}
+              onOpenDetail={() => setTrendDetailOpen(true)}
+            />
+            <LoginStatusCard snapshot={snapshot} settings={settings} />
+            <SkillsBoard enabled={settings.showTaskBoard} />
+            <EnvironmentPanel
+              diagnostics={snapshot?.diagnostics ?? []}
+              isPartial={hasPartialData}
+            />
+          </section>
+          <ErrorDisclosure
+            title="运行消息"
+            messages={[...(snapshot?.messages ?? []), error].filter(Boolean) as string[]}
+          />
+        </div>
+      </main>
       {settingsOpen && (
         <SettingsDrawer
           settings={settings}
@@ -113,6 +121,6 @@ export function App() {
           onClose={() => setTrendDetailOpen(false)}
         />
       )}
-    </main>
+    </>
   );
 }

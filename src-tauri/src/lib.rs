@@ -1,28 +1,37 @@
+mod atomic_file;
+mod auth_vault;
 mod automations;
 mod codex_config;
 mod codex_process;
 mod commands;
 mod error;
+mod history_migration;
 mod local_db;
+mod model_catalog;
 mod models;
 mod paths;
 mod pricing;
+mod process_guard;
 mod session_logs;
 mod settings;
 mod skills_board;
 mod snapshot;
 
 use commands::{
-    archive_skill, create_codex_config_backup, delete_codex_config_backup, disable_skill,
-    enable_skill, get_app_settings, get_detection_paths, get_skill_board, get_usage_snapshot,
+    archive_skill, clear_relay_api_key, create_codex_config_backup, delete_codex_config_backup,
+    disable_skill, enable_skill, fetch_api_models, get_app_settings, get_auth_credential_status,
+    get_detection_paths, get_skill_board, get_usage_snapshot, has_unified_history_backup,
     list_codex_config_backups, open_log_folder, open_skill_folder, refresh_task_board,
-    restore_codex_config_backup, save_app_settings, set_always_on_top,
+    restore_codex_config_backup, restore_unified_history, save_app_settings, set_always_on_top,
 };
 use tauri::{
     menu::{MenuBuilder, MenuItemBuilder},
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
-    Manager, WebviewWindow,
+    LogicalSize, Manager, WebviewWindow,
 };
+
+const MAIN_WINDOW_WIDTH: f64 = 930.0;
+const MAIN_WINDOW_HEIGHT: f64 = 760.0;
 
 pub fn run() {
     tauri::Builder::default()
@@ -40,6 +49,11 @@ pub fn run() {
             get_usage_snapshot,
             refresh_task_board,
             get_app_settings,
+            get_auth_credential_status,
+            clear_relay_api_key,
+            fetch_api_models,
+            has_unified_history_backup,
+            restore_unified_history,
             save_app_settings,
             set_always_on_top,
             get_detection_paths,
@@ -55,15 +69,49 @@ pub fn run() {
             open_skill_folder
         ])
         .setup(|app| {
+            if let Err(err) = crate::codex_config::capture_current_official_auth() {
+                eprintln!("保存 Codex 官方认证快照失败: {err}");
+            }
             if let Err(err) = crate::codex_config::ensure_default_codex_config_backup() {
                 eprintln!("保存 Codex 默认配置备份失败: {err}");
             }
+            let settings = crate::settings::read_settings().unwrap_or_default();
+            if let Err(err) = crate::codex_config::sync_codex_config(&settings) {
+                eprintln!("启动时同步 Codex 配置失败: {err}");
+            } else if let Err(err) = crate::history_migration::maybe_migrate(&settings) {
+                eprintln!("启动时统一 Codex 会话历史失败: {err}");
+            }
+            lock_main_window_geometry(app);
             setup_tray(app)?;
             setup_shortcut(app)?;
             Ok(())
         })
         .run(tauri::generate_context!())
         .expect("运行 codex-qianzong 时出错");
+}
+
+fn lock_main_window_geometry(app: &mut tauri::App) {
+    let Some(window) = app.get_webview_window("main") else {
+        return;
+    };
+    if let Err(err) = window.set_fullscreen(false) {
+        eprintln!("退出全屏失败: {err}");
+    }
+    if let Err(err) = window.unmaximize() {
+        eprintln!("退出最大化失败: {err}");
+    }
+    if let Err(err) = window.set_size(LogicalSize::new(MAIN_WINDOW_WIDTH, MAIN_WINDOW_HEIGHT)) {
+        eprintln!("恢复固定窗口尺寸失败: {err}");
+    }
+    if let Err(err) = window.set_resizable(false) {
+        eprintln!("锁定窗口尺寸失败: {err}");
+    }
+    if let Err(err) = window.set_maximizable(false) {
+        eprintln!("禁用窗口最大化失败: {err}");
+    }
+    if let Err(err) = window.set_shadow(false) {
+        eprintln!("关闭原生窗口阴影失败: {err}");
+    }
 }
 
 fn setup_tray(app: &mut tauri::App) -> tauri::Result<()> {

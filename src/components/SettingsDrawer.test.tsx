@@ -1,20 +1,30 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import {
+  clearRelayApiKey,
   createCodexConfigBackup,
   deleteCodexConfigBackup,
+  fetchApiModels,
+  getAuthCredentialStatus,
   getDetectionPaths,
+  hasUnifiedHistoryBackup,
   listCodexConfigBackups,
   restoreCodexConfigBackup,
+  restoreUnifiedHistory,
 } from "../lib/api";
 import { defaultSettings } from "../lib/mock";
 import { SettingsDrawer } from "./SettingsDrawer";
 
 vi.mock("../lib/api", () => ({
+  clearRelayApiKey: vi.fn(),
   createCodexConfigBackup: vi.fn(),
   deleteCodexConfigBackup: vi.fn(),
+  fetchApiModels: vi.fn(),
+  getAuthCredentialStatus: vi.fn(),
   getDetectionPaths: vi.fn(),
+  hasUnifiedHistoryBackup: vi.fn(),
   listCodexConfigBackups: vi.fn(),
   restoreCodexConfigBackup: vi.fn(),
+  restoreUnifiedHistory: vi.fn(),
 }));
 
 const defaultBackup = {
@@ -37,6 +47,22 @@ const manualBackup = {
 
 describe("SettingsDrawer", () => {
   beforeEach(() => {
+    vi.mocked(getAuthCredentialStatus).mockResolvedValue({
+      hasStoredOfficialAuth: true,
+      hasStoredRelayApiKey: true,
+      relayEndpoint: "https://api.example.com/v1",
+    });
+    vi.mocked(clearRelayApiKey).mockResolvedValue({
+      hasStoredOfficialAuth: true,
+      hasStoredRelayApiKey: false,
+      relayEndpoint: null,
+    });
+    vi.mocked(hasUnifiedHistoryBackup).mockResolvedValue(false);
+    vi.mocked(restoreUnifiedHistory).mockResolvedValue({
+      restoredJsonlFiles: 0,
+      restoredStateRows: 0,
+      skippedReason: "no_backup_ledger",
+    });
     vi.mocked(getDetectionPaths).mockResolvedValue({
       codexBinaryPath: "codex",
       codexDataDir: "~/.codex",
@@ -47,6 +73,7 @@ describe("SettingsDrawer", () => {
     vi.mocked(createCodexConfigBackup).mockResolvedValue([defaultBackup, manualBackup]);
     vi.mocked(restoreCodexConfigBackup).mockResolvedValue([defaultBackup, manualBackup]);
     vi.mocked(deleteCodexConfigBackup).mockResolvedValue([defaultBackup]);
+    vi.mocked(fetchApiModels).mockResolvedValue(["gpt-4o", "gpt-5", "o3"]);
   });
 
   it("hides relay-only fields in official mode", () => {
@@ -70,9 +97,9 @@ describe("SettingsDrawer", () => {
     expect(screen.getByRole("button", { name: /保存备份/ })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /恢复备份/ })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /删除备份/ })).toBeDisabled();
-    expect(screen.getByLabelText("配置备份").compareDocumentPosition(screen.getByLabelText("当前模式"))).toBe(
-      Node.DOCUMENT_POSITION_FOLLOWING,
-    );
+    expect(
+      screen.getByLabelText("配置备份").compareDocumentPosition(screen.getByLabelText("当前模式")),
+    ).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
   });
 
   it("deletes the selected manual config backup", async () => {
@@ -109,7 +136,7 @@ describe("SettingsDrawer", () => {
     await waitFor(() => expect(onClose).toHaveBeenCalled());
   });
 
-  it("clears relay fields when switching back to official mode", async () => {
+  it("preserves relay preferences when switching back to official mode", async () => {
     const onSave = vi.fn().mockResolvedValue(undefined);
     render(
       <SettingsDrawer
@@ -133,12 +160,52 @@ describe("SettingsDrawer", () => {
     expect(onSave).toHaveBeenCalledWith(
       expect.objectContaining({
         accessMode: "official",
-        apiEndpoint: null,
+        apiEndpoint: "https://api.example.com/v1",
         apiKey: null,
-        apiModel: "gpt-5",
-        reasoningEffort: "medium",
-        speedMode: "balanced",
+        apiModel: "relay-model",
+        reasoningEffort: "extreme",
+        speedMode: "fast",
       }),
     );
+  });
+
+  it("fetches OpenAI model options while keeping manual model input editable", async () => {
+    render(<SettingsDrawer settings={defaultSettings} onClose={() => {}} onSave={() => {}} />);
+
+    fireEvent.change(screen.getByLabelText("当前模式"), { target: { value: "relay" } });
+    fireEvent.change(screen.getByLabelText("API 地址"), {
+      target: { value: "api.example.com/v1/v1/" },
+    });
+    fireEvent.change(screen.getByLabelText("API Key"), { target: { value: "sk-test" } });
+    fireEvent.click(screen.getByRole("button", { name: "获取模型" }));
+
+    await waitFor(() =>
+      expect(fetchApiModels).toHaveBeenCalledWith("https://api.example.com/v1", "sk-test"),
+    );
+    expect(await screen.findByText("已获取 3 个 OpenAI 模型")).toBeInTheDocument();
+    expect(screen.getByLabelText("模型选项")).toHaveValue("gpt-5");
+
+    fireEvent.change(screen.getByLabelText("模型选项"), { target: { value: "gpt-4o" } });
+    expect(screen.getByLabelText("模型选项")).toHaveValue("gpt-4o");
+
+    fireEvent.change(screen.getByLabelText("模型选项"), { target: { value: "__manual__" } });
+    fireEvent.change(screen.getByLabelText("手动模型名字"), {
+      target: { value: "gpt-custom" },
+    });
+    expect(screen.getByLabelText("手动模型名字")).toHaveValue("gpt-custom");
+  });
+
+  it("shows the message from a structured Tauri save error", async () => {
+    const onSave = vi.fn().mockRejectedValue({
+      code: "config_error",
+      message: "配置错误: API 地址已变化",
+      detail: "Config(...) ",
+    });
+    render(<SettingsDrawer settings={defaultSettings} onClose={() => {}} onSave={onSave} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "保存设置" }));
+
+    expect(await screen.findByText("配置错误: API 地址已变化")).toBeInTheDocument();
+    expect(screen.queryByText("[object Object]")).not.toBeInTheDocument();
   });
 });

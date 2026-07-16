@@ -1,5 +1,6 @@
 import { Minus, RefreshCw, Settings, ShieldCheck, X } from "lucide-react";
-import type { PointerEvent } from "react";
+import { useRef } from "react";
+import type { MouseEvent, PointerEvent } from "react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { formatTime } from "../lib/format";
 import type { UsageSnapshot } from "../types/usage";
@@ -13,8 +14,46 @@ interface HeaderBarProps {
 
 export function HeaderBar({ snapshot, isRefreshing, onRefresh, onOpenSettings }: HeaderBarProps) {
   const plan = formatPlan(snapshot?.account?.planType ?? snapshot?.account?.accountType);
+  const dragOrigin = useRef<{ pointerId: number; x: number; y: number } | null>(null);
+
+  function handlePointerDown(event: PointerEvent<HTMLElement>) {
+    if (event.button !== 0 || event.detail > 1 || !isTauriRuntime()) return;
+    const target = event.target;
+    if (!(target instanceof HTMLElement)) return;
+    if (target.closest("button, a, input, select, textarea")) return;
+
+    event.preventDefault();
+    dragOrigin.current = { pointerId: event.pointerId, x: event.clientX, y: event.clientY };
+    event.currentTarget.setPointerCapture(event.pointerId);
+  }
+
+  function handlePointerMove(event: PointerEvent<HTMLElement>) {
+    const origin = dragOrigin.current;
+    if (!origin || origin.pointerId !== event.pointerId) return;
+    if (Math.hypot(event.clientX - origin.x, event.clientY - origin.y) < 5) return;
+
+    dragOrigin.current = null;
+    releasePointerCapture(event);
+    void getCurrentWindow()
+      .startDragging()
+      .catch(() => undefined);
+  }
+
+  function clearDragOrigin(event: PointerEvent<HTMLElement>) {
+    if (dragOrigin.current?.pointerId !== event.pointerId) return;
+    dragOrigin.current = null;
+    releasePointerCapture(event);
+  }
+
   return (
-    <header className="header-bar" data-tauri-drag-region onPointerDown={startDragFromHeader}>
+    <header
+      className="header-bar"
+      onDoubleClick={blockHeaderDoubleClick}
+      onPointerDown={handlePointerDown}
+      onPointerMove={handlePointerMove}
+      onPointerUp={clearDragOrigin}
+      onPointerCancel={clearDragOrigin}
+    >
       <div className="brand-lockup">
         <div className="brand-mark" aria-hidden="true">
           Q
@@ -58,16 +97,15 @@ export function HeaderBar({ snapshot, isRefreshing, onRefresh, onOpenSettings }:
   );
 }
 
-function startDragFromHeader(event: PointerEvent<HTMLElement>) {
-  if (event.button !== 0) return;
-  const target = event.target;
-  if (!(target instanceof HTMLElement)) return;
-  if (target.closest("button, a, input, select, textarea")) return;
-  if (typeof window === "undefined" || !("__TAURI_INTERNALS__" in window)) return;
+function releasePointerCapture(event: PointerEvent<HTMLElement>) {
+  if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+    event.currentTarget.releasePointerCapture(event.pointerId);
+  }
+}
 
-  void getCurrentWindow()
-    .startDragging()
-    .catch(() => undefined);
+function blockHeaderDoubleClick(event: MouseEvent<HTMLElement>) {
+  event.preventDefault();
+  event.stopPropagation();
 }
 
 function isTauriRuntime(): boolean {
