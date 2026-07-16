@@ -2,10 +2,12 @@ import { invoke } from "@tauri-apps/api/core";
 import { defaultSettings, mockSnapshot } from "./mock";
 import type {
   AppSettings,
+  AuthCredentialStatus,
   CodexConfigBackup,
   DetectionPaths,
   TaskBoard,
   UsageSnapshot,
+  HistoryRestoreOutcome,
 } from "../types/usage";
 
 function isTauriRuntime(): boolean {
@@ -30,6 +32,36 @@ export function refreshTaskBoard(): Promise<TaskBoard> {
 
 export function getAppSettings(): Promise<AppSettings> {
   return call("get_app_settings", undefined, defaultSettings);
+}
+
+const mockCredentialStatus: AuthCredentialStatus = {
+  hasStoredOfficialAuth: true,
+  hasStoredRelayApiKey: false,
+  relayEndpoint: null,
+};
+
+export function getAuthCredentialStatus(): Promise<AuthCredentialStatus> {
+  return call("get_auth_credential_status", undefined, mockCredentialStatus);
+}
+
+export function clearRelayApiKey(): Promise<AuthCredentialStatus> {
+  return call("clear_relay_api_key", undefined, {
+    ...mockCredentialStatus,
+    hasStoredRelayApiKey: false,
+    relayEndpoint: null,
+  });
+}
+
+export function hasUnifiedHistoryBackup(): Promise<boolean> {
+  return call("has_unified_history_backup", undefined, false);
+}
+
+export function restoreUnifiedHistory(): Promise<HistoryRestoreOutcome> {
+  return call("restore_unified_history", undefined, {
+    restoredJsonlFiles: 0,
+    restoredStateRows: 0,
+    skippedReason: "no_backup_ledger",
+  });
 }
 
 export function saveAppSettings(settings: AppSettings): Promise<AppSettings> {

@@ -1,0 +1,65 @@
+name: Build macOS DMG
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - codex/build-macos-dmg
+
+permissions:
+  contents: read
+
+jobs:
+  build-arm64-dmg:
+    name: Build Apple Silicon DMG
+    runs-on: macos-14
+    timeout-minutes: 45
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-darwin
+
+      - name: Cache Rust build
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri -> target
+
+      - name: Install frontend dependencies
+        run: npm ci
+
+      - name: Run frontend tests
+        run: npm test
+
+      - name: Build macOS application
+        run: npm run tauri build -- --target aarch64-apple-darwin --bundles app
+
+      - name: Ad-hoc sign application
+        run: codesign --force --deep --sign - src-tauri/target/aarch64-apple-darwin/release/bundle/macos/codex-qianzong.app
+
+      - name: Create tester DMG
+        run: |
+          mkdir -p dist-artifacts
+          hdiutil create \
+            -volname codex-qianzong \
+            -srcfolder src-tauri/target/aarch64-apple-darwin/release/bundle/macos/codex-qianzong.app \
+            -format UDZO \
+            dist-artifacts/codex-qianzong_1.5.0_aarch64-test.dmg
+
+      - name: Upload DMG artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: codex-qianzong-macos-aarch64-dmg
+          path: dist-artifacts/codex-qianzong_1.5.0_aarch64-test.dmg
+          if-no-files-found: error
+          retention-days: 14

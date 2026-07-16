@@ -1,20 +1,28 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import {
+  clearRelayApiKey,
   createCodexConfigBackup,
   deleteCodexConfigBackup,
+  getAuthCredentialStatus,
   getDetectionPaths,
+  hasUnifiedHistoryBackup,
   listCodexConfigBackups,
   restoreCodexConfigBackup,
+  restoreUnifiedHistory,
 } from "../lib/api";
 import { defaultSettings } from "../lib/mock";
 import { SettingsDrawer } from "./SettingsDrawer";
 
 vi.mock("../lib/api", () => ({
+  clearRelayApiKey: vi.fn(),
   createCodexConfigBackup: vi.fn(),
   deleteCodexConfigBackup: vi.fn(),
+  getAuthCredentialStatus: vi.fn(),
   getDetectionPaths: vi.fn(),
+  hasUnifiedHistoryBackup: vi.fn(),
   listCodexConfigBackups: vi.fn(),
   restoreCodexConfigBackup: vi.fn(),
+  restoreUnifiedHistory: vi.fn(),
 }));
 
 const defaultBackup = {
@@ -37,6 +45,22 @@ const manualBackup = {
 
 describe("SettingsDrawer", () => {
   beforeEach(() => {
+    vi.mocked(getAuthCredentialStatus).mockResolvedValue({
+      hasStoredOfficialAuth: true,
+      hasStoredRelayApiKey: true,
+      relayEndpoint: "https://api.example.com/v1",
+    });
+    vi.mocked(clearRelayApiKey).mockResolvedValue({
+      hasStoredOfficialAuth: true,
+      hasStoredRelayApiKey: false,
+      relayEndpoint: null,
+    });
+    vi.mocked(hasUnifiedHistoryBackup).mockResolvedValue(false);
+    vi.mocked(restoreUnifiedHistory).mockResolvedValue({
+      restoredJsonlFiles: 0,
+      restoredStateRows: 0,
+      skippedReason: "no_backup_ledger",
+    });
     vi.mocked(getDetectionPaths).mockResolvedValue({
       codexBinaryPath: "codex",
       codexDataDir: "~/.codex",
@@ -70,9 +94,9 @@ describe("SettingsDrawer", () => {
     expect(screen.getByRole("button", { name: /保存备份/ })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /恢复备份/ })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /删除备份/ })).toBeDisabled();
-    expect(screen.getByLabelText("配置备份").compareDocumentPosition(screen.getByLabelText("当前模式"))).toBe(
-      Node.DOCUMENT_POSITION_FOLLOWING,
-    );
+    expect(
+      screen.getByLabelText("配置备份").compareDocumentPosition(screen.getByLabelText("当前模式")),
+    ).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
   });
 
   it("deletes the selected manual config backup", async () => {
@@ -109,7 +133,7 @@ describe("SettingsDrawer", () => {
     await waitFor(() => expect(onClose).toHaveBeenCalled());
   });
 
-  it("clears relay fields when switching back to official mode", async () => {
+  it("preserves relay preferences when switching back to official mode", async () => {
     const onSave = vi.fn().mockResolvedValue(undefined);
     render(
       <SettingsDrawer
@@ -133,11 +157,11 @@ describe("SettingsDrawer", () => {
     expect(onSave).toHaveBeenCalledWith(
       expect.objectContaining({
         accessMode: "official",
-        apiEndpoint: null,
+        apiEndpoint: "https://api.example.com/v1",
         apiKey: null,
-        apiModel: "gpt-5",
-        reasoningEffort: "medium",
-        speedMode: "balanced",
+        apiModel: "relay-model",
+        reasoningEffort: "extreme",
+        speedMode: "fast",
       }),
     );
   });

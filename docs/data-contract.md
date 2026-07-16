@@ -38,23 +38,27 @@ Important models:
 
 ## IPC Commands
 
-| Command               | Purpose                                                                        |
-| --------------------- | ------------------------------------------------------------------------------ |
-| `get_usage_snapshot`  | Full quota, local usage, task board, diagnostics, messages                     |
-| `refresh_task_board`  | Lightweight task board refresh                                                 |
-| `get_app_settings`    | Read persisted app settings                                                    |
-| `save_app_settings`   | Persist settings, sync Codex config, clamp refresh interval to 30-3600 seconds |
-| `list_codex_config_backups` | Return metadata for managed Codex config/auth backup snapshots |
-| `create_codex_config_backup` | Save the current Codex `config.toml` and `auth.json` snapshot, returning the refreshed backup list |
-| `restore_codex_config_backup` | Restore a selected managed snapshot after timestamp-backing up the current Codex files |
-| `delete_codex_config_backup` | Delete a selected non-default managed backup directory and return the refreshed backup list |
-| `get_detection_paths` | Return detected Codex executable, data dir, DB, and log dir                    |
-| `open_log_folder`     | Open app log folder using OS shell                                             |
-| `get_skill_board`     | Return local Codex Skills metadata for the isolated Skills board               |
-| `disable_skill`       | Move an allowed user skill to the local `skills-disabled` folder               |
-| `enable_skill`        | Move a disabled skill from local `skills-disabled` back to `skills`            |
-| `archive_skill`       | Move an allowed user skill to the local `skills-trash` folder                  |
-| `open_skill_folder`   | Open a resolved skill folder using the OS file manager                         |
+| Command                       | Purpose                                                                                              |
+| ----------------------------- | ---------------------------------------------------------------------------------------------------- |
+| `get_usage_snapshot`          | Full quota, local usage, task board, diagnostics, messages                                           |
+| `refresh_task_board`          | Lightweight task board refresh                                                                       |
+| `get_app_settings`            | Read persisted app settings                                                                          |
+| `save_app_settings`           | Persist settings, sync Codex config/auth, and schedule requested history migration                   |
+| `get_auth_credential_status`  | Return booleans for saved official auth/relay Key and the bound relay endpoint; never return secrets |
+| `clear_relay_api_key`         | Remove the encrypted relay credential while preserving saved official auth                           |
+| `has_unified_history_backup`  | Report whether a migration ledger exists for the active Codex data directory                         |
+| `restore_unified_history`     | Restore migrated JSONL/SQLite provider IDs after unified history is disabled                         |
+| `list_codex_config_backups`   | Return metadata for managed Codex config/auth backup snapshots                                       |
+| `create_codex_config_backup`  | Save the current Codex `config.toml` and `auth.json` snapshot, returning the refreshed backup list   |
+| `restore_codex_config_backup` | Restore a selected managed snapshot after timestamp-backing up the current Codex files               |
+| `delete_codex_config_backup`  | Delete a selected non-default managed backup directory and return the refreshed backup list          |
+| `get_detection_paths`         | Return detected Codex executable, data dir, DB, and log dir                                          |
+| `open_log_folder`             | Open app log folder using OS shell                                                                   |
+| `get_skill_board`             | Return local Codex Skills metadata for the isolated Skills board                                     |
+| `disable_skill`               | Move an allowed user skill to the local `skills-disabled` folder                                     |
+| `enable_skill`                | Move a disabled skill from local `skills-disabled` back to `skills`                                  |
+| `archive_skill`               | Move an allowed user skill to the local `skills-trash` folder                                        |
+| `open_skill_folder`           | Open a resolved skill folder using the OS file manager                                               |
 
 ## Data Semantics
 
@@ -72,10 +76,12 @@ Important models:
 - Official 7-day trend windows are calendar-day buckets ending on the local current date. Missing dates are rendered as zero-token buckets so the chart remains stable.
 - Official token value is an account-level estimate using aggregate token totals and the configured GPT-5 input token rate.
 - `AppSettings.accessMode` records the selected Codex access display mode: official native login or API relay. Official native mode uses the default Codex app-server/account state and does not require or display an API endpoint.
-- API relay fields are `apiEndpoint`, one-time `apiKey`, `apiModel`, `reasoningEffort`, and `speedMode`. They are shown only for relay mode in the settings UI. Empty endpoint/path fields are normalized to `null`, an empty model name is normalized to `gpt-5` on save, relay endpoints are normalized to exactly one trailing `/v1`, and the dashboard uses local usage data because API users may not have official login data.
-- `AppSettings.apiKey` is accepted by `save_app_settings` for writing Codex `auth.json` and is not serialized into the app `settings.json` response/storage.
-- Saving API relay mode updates the user Codex `config.toml` with `model_provider = "qianzong_relay"`, `[model_providers.qianzong_relay]`, `base_url`, `wire_api = "responses"`, `preferred_auth_method = "apikey"`, and the selected model/reasoning/speed fields. It also updates Codex `auth.json` with `auth_mode = "apikey"` and `OPENAI_API_KEY`; if the UI leaves API Key empty, an existing non-empty `OPENAI_API_KEY` is preserved, otherwise save fails.
-- Saving official native mode edits the current Codex `config.toml` in place: it removes the qianzong relay provider shape, clears relay-only settings (`apiEndpoint`, one-time `apiKey`, relay model/reasoning/speed choices), and restores official ChatGPT auth defaults while preserving unrelated current config sections such as project paths/trust records and MCP servers. It must not restore from an old whole-file snapshot because that can drop newer Codex-managed records. It also sets Codex `auth.json` to `auth_mode = "chatgpt"` and clears `OPENAI_API_KEY`.
+- API relay fields are `apiEndpoint`, transient `apiKey`, `apiModel`, `reasoningEffort`, and `speedMode`. They are shown only for relay mode in the settings UI. Empty endpoint/path fields are normalized to `null`, an empty model name is normalized to `gpt-5` on save, relay endpoints are normalized to exactly one trailing `/v1`, and the dashboard uses local usage data because API users may not have official login data.
+- `AppSettings.apiKey` is accepted by `save_app_settings` but is skipped during serialization. The encrypted vault stores it with the normalized endpoint; subsequent saves can leave the input empty and reuse it only for that same endpoint. A different endpoint requires a new Key.
+- Saving API relay mode updates the user Codex `config.toml` with `model_provider = "qianzong_relay"` or, when unified history is enabled, `qianzong_unified`; it writes the matching provider table, `base_url`, `wire_api = "responses"`, `preferred_auth_method = "apikey"`, and selected model/reasoning/speed fields. Codex `auth.json` is reduced to `auth_mode = "apikey"` plus `OPENAI_API_KEY` after the full official object has been captured to the encrypted vault.
+- Saving official native mode edits the current Codex `config.toml` in place: it removes managed relay provider residue and restores official ChatGPT auth defaults while preserving unrelated current config sections such as project paths/trust records and MCP servers. Relay endpoint/model/reasoning/speed preferences remain in app settings for the next switch; only the transient `apiKey` field is cleared. Codex `auth.json` is restored from the full saved official snapshot, including token and unknown fields, with `auth_mode = "chatgpt"` and `OPENAI_API_KEY = null`. If relay auth is active and no official snapshot exists, the switch fails with a login instruction.
+- `AppSettings.unifyCodexSessionHistory` is disabled by default. When enabled, both modes use `qianzong_unified`; otherwise official uses `openai` and relay uses `qianzong_relay`. `unifyCodexMigrateExisting` explicitly opts into rewriting known `openai`/`qianzong_relay` provider IDs in session JSONL and `state_5.sqlite`.
+- History migration backs up every changed JSONL file and SQLite database, records original provider IDs per session/thread, and skips unknown providers. Restore requires unified mode to be off and changes only records still marked `qianzong_unified`.
 - The desktop app creates one `default-initial` managed backup of Codex `config.toml` and `auth.json` on first startup before later access-mode synchronization can rewrite those files. The settings drawer can create manual managed backups, select them from a dropdown, restore them, and delete non-default backups. Restore first creates timestamped backups of the current files, then copies backed-up files back; if a file did not exist in the selected snapshot, restoring that snapshot removes the current file to match the original state. `default-initial` is protected and cannot be deleted.
 - `AppSettings.membershipStartedOn` is an optional `YYYY-MM-DD` original membership open date used only for current billing-cycle value calculation. Invalid or empty dates are normalized to `null`.
 - `ReasoningEffort.extreme` maps to Codex `model_reasoning_effort = "xhigh"`. `ApiSpeedMode.fast` maps to `service_tier = "priority"`; stable/balanced remove the forced service tier.

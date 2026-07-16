@@ -17,13 +17,17 @@
         "title": "codex-qianzong",
         "width": 930,
         "height": 760,
-        "minWidth": 760,
-        "minHeight": 560,
+        "minWidth": 930,
+        "minHeight": 760,
+        "maxWidth": 930,
+        "maxHeight": 760,
         "center": true,
-        "resizable": true,
+        "resizable": false,
+        "maximizable": false,
+        "fullscreen": false,
         "decorations": false,
         "transparent": true,
-        "shadow": true
+        "shadow": false
       }
     ],
     "security": {

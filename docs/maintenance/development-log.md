@@ -45,3 +45,12 @@
 - Skills 看板新增 Google 翻译切换按钮，翻译只影响当前显示的技能描述，`取消翻译` 会恢复原文，不写回 `SKILL.md`。
 - Skills 看板新增启用已禁用技能能力：后端 `enable_skill` 将 `.codex/skills-disabled` 条目移回 `.codex/skills`，前端成功启用后切回 `已启用` 列表。
 - 发布版本号统一更新到 `1.2.0`，并生成 Windows MSI/NSIS 安装包。子项目 `.gitignore` 排除了 `.devlogs` 和 `.dev-logs`，避免本地验证截图和日志进入独立发布仓库。
+
+## 2026-07-16
+
+- 官方原生和 API 中转改为双槽认证：完整官方 `auth.json` 与端点绑定的中转 API Key 存入加密保险箱，主密钥由系统 keyring 保存，设置 IPC 只返回脱敏状态。
+- 切到中转前捕获官方 access/refresh/ID token 与未知字段；切回官方时恢复整个快照。中转 Key 和端点/模型/推理/速度偏好继续保留，地址变化时必须重新输入对应 Key。
+- 新增默认关闭的统一 Codex 会话历史。开启后两种模式共用 `qianzong_unified` provider；可选择迁移既有 JSONL `session_meta` 和 `state_5.sqlite` thread provider。
+- 历史迁移使用 SQLite backup/transaction、JSONL 与数据库备份、原 provider 账本和迁移锁；关闭统一历史后可按账本恢复，未知 provider 不会被改写。
+- Codex config/auth、认证保险箱和 JSONL 改用同目录临时文件原子替换；Windows 使用 `MoveFileExW` replace + write-through。
+- 验证通过：Rust 40 项测试、前端 19 项测试、TypeScript/Vite 构建、ESLint、Rust check，以及本次修改文件的格式检查。

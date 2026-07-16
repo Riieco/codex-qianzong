@@ -1,15 +1,20 @@
 import { useEffect, useState } from "react";
-import { RotateCcw, Save, Trash2, X } from "lucide-react";
+import { History, KeyRound, RotateCcw, Save, Trash2, X } from "lucide-react";
 import {
+  clearRelayApiKey,
   createCodexConfigBackup,
   deleteCodexConfigBackup,
+  getAuthCredentialStatus,
   getDetectionPaths,
+  hasUnifiedHistoryBackup,
   listCodexConfigBackups,
   restoreCodexConfigBackup,
+  restoreUnifiedHistory,
 } from "../lib/api";
 import type {
   ApiSpeedMode,
   AppSettings,
+  AuthCredentialStatus,
   CodexAccessMode,
   CodexConfigBackup,
   DetectionPaths,
@@ -33,10 +38,15 @@ export function SettingsDrawer({ settings, onClose, onSave }: SettingsDrawerProp
   const [isBackupBusy, setIsBackupBusy] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
   const [backupStatus, setBackupStatus] = useState<string | null>(null);
+  const [credentialStatus, setCredentialStatus] = useState<AuthCredentialStatus | null>(null);
+  const [hasHistoryBackup, setHasHistoryBackup] = useState(false);
+  const [isCredentialBusy, setIsCredentialBusy] = useState(false);
   const selectedBackup = backups.find((backup) => backup.id === selectedBackupId) ?? null;
 
   useEffect(() => {
     void getDetectionPaths().then(setPaths);
+    void getAuthCredentialStatus().then(setCredentialStatus);
+    void hasUnifiedHistoryBackup().then(setHasHistoryBackup);
     void refreshBackups();
   }, []);
 
@@ -113,6 +123,42 @@ export function SettingsDrawer({ settings, onClose, onSave }: SettingsDrawerProp
     }
   }
 
+  async function handleClearRelayKey() {
+    if (!window.confirm("确认清除安全保存的 API Key？下次切换到中转模式时需要重新输入。")) {
+      return;
+    }
+    setIsCredentialBusy(true);
+    setSaveError(null);
+    try {
+      setCredentialStatus(await clearRelayApiKey());
+    } catch (err) {
+      setSaveError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setIsCredentialBusy(false);
+    }
+  }
+
+  async function handleRestoreHistory() {
+    if (!window.confirm("确认按迁移账本恢复原有官方与中转会话分桶？恢复前会再次备份当前历史。")) {
+      return;
+    }
+    setIsCredentialBusy(true);
+    setSaveError(null);
+    try {
+      const result = await restoreUnifiedHistory();
+      setBackupStatus(
+        result.skippedReason
+          ? "没有需要恢复的会话历史"
+          : `已恢复 ${result.restoredJsonlFiles} 个会话文件和 ${result.restoredStateRows} 条索引`,
+      );
+      setHasHistoryBackup(await hasUnifiedHistoryBackup());
+    } catch (err) {
+      setSaveError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setIsCredentialBusy(false);
+    }
+  }
+
   return (
     <aside className="settings-drawer" aria-label="设置">
       <div className="drawer-header">
@@ -185,15 +231,32 @@ export function SettingsDrawer({ settings, onClose, onSave }: SettingsDrawerProp
           当前模式
           <select
             value={draft.accessMode}
-            onChange={(event) =>
-              setDraft(applyAccessMode(draft, event.target.value as CodexAccessMode))
-            }
+            onChange={(event) => {
+              const accessMode = event.target.value as CodexAccessMode;
+              const next = applyAccessMode(draft, accessMode);
+              setDraft({
+                ...next,
+                apiEndpoint:
+                  accessMode === "relay" && !next.apiEndpoint
+                    ? credentialStatus?.relayEndpoint || null
+                    : next.apiEndpoint,
+              });
+            }}
           >
             <option value="official">官方原生</option>
             <option value="relay">API 中转</option>
           </select>
         </label>
         <p className="settings-hint">{accessModeHint(draft.accessMode)}</p>
+
+        <div className="path-summary credential-summary">
+          <KeyRound size={15} />
+          <strong>认证保险箱</strong>
+          <span>
+            官方{credentialStatus?.hasStoredOfficialAuth ? "已保存" : "待捕获"} · API Key
+            {credentialStatus?.hasStoredRelayApiKey ? "已安全保存" : "未保存"}
+          </span>
+        </div>
 
         {draft.accessMode === "relay" && (
           <>
@@ -217,10 +280,26 @@ export function SettingsDrawer({ settings, onClose, onSave }: SettingsDrawerProp
                 type="password"
                 autoComplete="off"
                 value={draft.apiKey ?? ""}
-                placeholder="首次配置必填；留空会保留已有 Key"
+                placeholder={
+                  credentialStatus?.hasStoredRelayApiKey
+                    ? "已安全保存；留空继续使用"
+                    : "首次配置必填"
+                }
                 onChange={(event) => setDraft({ ...draft, apiKey: event.target.value || null })}
               />
             </label>
+
+            {credentialStatus?.hasStoredRelayApiKey && (
+              <button
+                className="quiet-button danger-button"
+                type="button"
+                disabled={isCredentialBusy}
+                onClick={() => void handleClearRelayKey()}
+              >
+                <Trash2 size={14} />
+                清除已保存 API Key
+              </button>
+            )}
 
             <label>
               模型名字
@@ -375,6 +454,54 @@ export function SettingsDrawer({ settings, onClose, onSave }: SettingsDrawerProp
         </label>
       </div>
 
+      <div className="history-settings-block">
+        <div className="toggle-row history-toggle-row">
+          <label>
+            <input
+              type="checkbox"
+              checked={draft.unifyCodexSessionHistory}
+              onChange={(event) =>
+                setDraft({
+                  ...draft,
+                  unifyCodexSessionHistory: event.target.checked,
+                  unifyCodexMigrateExisting: event.target.checked
+                    ? draft.unifyCodexMigrateExisting
+                    : false,
+                })
+              }
+            />
+            统一 Codex 会话历史
+          </label>
+          {draft.unifyCodexSessionHistory && (
+            <label>
+              <input
+                type="checkbox"
+                checked={draft.unifyCodexMigrateExisting}
+                onChange={(event) =>
+                  setDraft({ ...draft, unifyCodexMigrateExisting: event.target.checked })
+                }
+              />
+              迁移已有会话
+            </label>
+          )}
+        </div>
+        <p className="settings-hint">
+          开启后官方原生与 API 中转使用同一个恢复历史；迁移已有会话会先备份 JSONL 和
+          state_5.sqlite。
+        </p>
+        {!settings.unifyCodexSessionHistory && hasHistoryBackup && (
+          <button
+            className="quiet-button"
+            type="button"
+            disabled={isCredentialBusy}
+            onClick={() => void handleRestoreHistory()}
+          >
+            <History size={14} />
+            恢复原有历史分桶
+          </button>
+        )}
+      </div>
+
       <div className="path-summary">
         <strong>已探测状态数据库</strong>
         <span>{paths?.stateDbPath ?? "未探测到"}</span>
@@ -402,18 +529,7 @@ function accessModeHint(mode: CodexAccessMode): string {
 }
 
 function applyAccessMode(settings: AppSettings, accessMode: CodexAccessMode): AppSettings {
-  if (accessMode === "official") {
-    return {
-      ...settings,
-      accessMode,
-      apiEndpoint: null,
-      apiKey: null,
-      apiModel: "gpt-5",
-      reasoningEffort: "medium",
-      speedMode: "balanced",
-    };
-  }
-  return { ...settings, accessMode };
+  return { ...settings, accessMode, apiKey: null };
 }
 
 function normalizeApiEndpoint(value: string): string | null {

@@ -33,6 +33,13 @@ npm run rust:check
 npm run tauri build
 ```
 
+## GitHub Actions
+
+- `.github/workflows/build-macos-dmg.yml` builds an Apple Silicon test DMG on `macos-14`.
+- Pushes to `codex/build-macos-dmg` trigger the workflow automatically; it can also be started manually after the workflow exists on the default branch.
+- The workflow builds an ARM64 `.app`, applies ad-hoc signing, creates the DMG with `hdiutil`, and uploads `codex-qianzong-macos-aarch64-dmg` for 14 days.
+- The artifact is intended for local testing and is not Apple-notarized.
+
 When macOS proc-macro dylibs fail with `E0463`, build with an official rustup `1.92.0` toolchain and keep `CARGO_HOME`/`CARGO_TARGET_DIR` outside protected Documents paths, for example under `/tmp`. Build `tauri/custom-protocol` once before `tauri build` so the bundle path uses a loadable `tauri_macros` dylib.
 
 ## Runtime Behavior

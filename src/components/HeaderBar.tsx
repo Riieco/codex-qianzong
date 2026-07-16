@@ -1,5 +1,5 @@
 import { Minus, RefreshCw, Settings, ShieldCheck, X } from "lucide-react";
-import type { PointerEvent } from "react";
+import type { MouseEvent, PointerEvent } from "react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { formatTime } from "../lib/format";
 import type { UsageSnapshot } from "../types/usage";
@@ -14,7 +14,12 @@ interface HeaderBarProps {
 export function HeaderBar({ snapshot, isRefreshing, onRefresh, onOpenSettings }: HeaderBarProps) {
   const plan = formatPlan(snapshot?.account?.planType ?? snapshot?.account?.accountType);
   return (
-    <header className="header-bar" data-tauri-drag-region onPointerDown={startDragFromHeader}>
+    <header
+      className="header-bar"
+      data-tauri-drag-region
+      onDoubleClick={blockHeaderDoubleClick}
+      onPointerDown={startDragFromHeader}
+    >
       <div className="brand-lockup">
         <div className="brand-mark" aria-hidden="true">
           Q
@@ -59,7 +64,7 @@ export function HeaderBar({ snapshot, isRefreshing, onRefresh, onOpenSettings }:
 }
 
 function startDragFromHeader(event: PointerEvent<HTMLElement>) {
-  if (event.button !== 0) return;
+  if (event.button !== 0 || event.detail > 1) return;
   const target = event.target;
   if (!(target instanceof HTMLElement)) return;
   if (target.closest("button, a, input, select, textarea")) return;
@@ -68,6 +73,11 @@ function startDragFromHeader(event: PointerEvent<HTMLElement>) {
   void getCurrentWindow()
     .startDragging()
     .catch(() => undefined);
+}
+
+function blockHeaderDoubleClick(event: MouseEvent<HTMLElement>) {
+  event.preventDefault();
+  event.stopPropagation();
 }
 
 function isTauriRuntime(): boolean {

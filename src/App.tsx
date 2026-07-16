@@ -66,39 +66,46 @@ export function App() {
   const dashboardData = selectDashboardData(snapshot, settings.accessMode);
 
   return (
-    <main className="app-shell">
-      <HeaderBar
-        snapshot={snapshot}
-        isRefreshing={isRefreshing}
-        onRefresh={() => void refresh()}
-        onOpenSettings={() => setSettingsOpen(true)}
-      />
-      <section className="dashboard-grid" aria-busy={isRefreshing}>
-        <QuotaPanel
+    <>
+      <main className="app-shell">
+        <HeaderBar
           snapshot={snapshot}
-          isLoading={!snapshot && isRefreshing}
-          accessMode={settings.accessMode}
+          isRefreshing={isRefreshing}
+          onRefresh={() => void refresh()}
+          onOpenSettings={() => setSettingsOpen(true)}
         />
-        <TokenValuePanel
-          usage={dashboardData.tokenUsage}
-          valuePeriodUsage={dashboardData.valuePeriodUsage}
-          isLoading={!snapshot}
-          sourceLabel={dashboardData.tokenSourceLabel}
-        />
-        <TrendPanel
-          buckets={dashboardData.trendBuckets}
-          isLoading={!snapshot}
-          sourceLabel={dashboardData.trendSourceLabel}
-          onOpenDetail={() => setTrendDetailOpen(true)}
-        />
-        <LoginStatusCard snapshot={snapshot} settings={settings} />
-        <SkillsBoard enabled={settings.showTaskBoard} />
-        <EnvironmentPanel diagnostics={snapshot?.diagnostics ?? []} isPartial={hasPartialData} />
-      </section>
-      <ErrorDisclosure
-        title="运行消息"
-        messages={[...(snapshot?.messages ?? []), error].filter(Boolean) as string[]}
-      />
+        <div className="app-content-scroll">
+          <section className="dashboard-grid" aria-busy={isRefreshing}>
+            <QuotaPanel
+              snapshot={snapshot}
+              isLoading={!snapshot && isRefreshing}
+              accessMode={settings.accessMode}
+            />
+            <TokenValuePanel
+              usage={dashboardData.tokenUsage}
+              valuePeriodUsage={dashboardData.valuePeriodUsage}
+              isLoading={!snapshot}
+              sourceLabel={dashboardData.tokenSourceLabel}
+            />
+            <TrendPanel
+              buckets={dashboardData.trendBuckets}
+              isLoading={!snapshot}
+              sourceLabel={dashboardData.trendSourceLabel}
+              onOpenDetail={() => setTrendDetailOpen(true)}
+            />
+            <LoginStatusCard snapshot={snapshot} settings={settings} />
+            <SkillsBoard enabled={settings.showTaskBoard} />
+            <EnvironmentPanel
+              diagnostics={snapshot?.diagnostics ?? []}
+              isPartial={hasPartialData}
+            />
+          </section>
+          <ErrorDisclosure
+            title="运行消息"
+            messages={[...(snapshot?.messages ?? []), error].filter(Boolean) as string[]}
+          />
+        </div>
+      </main>
       {settingsOpen && (
         <SettingsDrawer
           settings={settings}
@@ -113,6 +120,6 @@ export function App() {
           onClose={() => setTrendDetailOpen(false)}
         />
       )}
-    </main>
+    </>
   );
 }

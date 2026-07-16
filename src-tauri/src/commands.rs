@@ -1,15 +1,17 @@
 use crate::{
+    auth_vault::AuthCredentialStatus,
     codex_config::{
+        auth_credential_status, clear_stored_relay_api_key,
         create_codex_config_backup as create_config_backup,
         delete_codex_config_backup as delete_config_backup,
         list_codex_config_backups as list_config_backups,
         restore_codex_config_backup as restore_config_backup, sync_codex_config,
     },
     error::{AppError, AppResult},
+    history_migration::{self, HistoryRestoreOutcome},
     local_db::read_task_board,
     models::{
-        ApiSpeedMode, AppSettings, CodexAccessMode, CodexConfigBackup, DetectionPaths,
-        ReasoningEffort, TaskBoard, UsageSnapshot,
+        AppSettings, CodexAccessMode, CodexConfigBackup, DetectionPaths, TaskBoard, UsageSnapshot,
     },
     paths::{app_log_dir, detect_codex_data_dir, detect_state_db},
     settings::{detection_paths, read_settings, write_settings},
@@ -80,11 +82,45 @@ pub async fn get_app_settings() -> AppResult<AppSettings> {
 }
 
 #[tauri::command]
+pub async fn get_auth_credential_status() -> AppResult<AuthCredentialStatus> {
+    auth_credential_status()
+}
+
+#[tauri::command]
+pub async fn clear_relay_api_key() -> AppResult<AuthCredentialStatus> {
+    clear_stored_relay_api_key()
+}
+
+#[tauri::command]
+pub async fn has_unified_history_backup() -> AppResult<bool> {
+    history_migration::has_backup(&read_settings().unwrap_or_default())
+}
+
+#[tauri::command]
+pub async fn restore_unified_history() -> AppResult<HistoryRestoreOutcome> {
+    let settings = read_settings().unwrap_or_default();
+    tauri::async_runtime::spawn_blocking(move || history_migration::restore(&settings))
+        .await
+        .map_err(|err| AppError::Process(format!("后台恢复会话历史失败: {err}")))?
+}
+
+#[tauri::command]
 pub async fn save_app_settings(settings: AppSettings) -> AppResult<AppSettings> {
     let mut settings = normalize_settings_for_save(settings);
     sync_codex_config(&settings)?;
     settings.api_key = None;
-    write_settings(&settings)
+    let saved = write_settings(&settings)?;
+    if saved.unify_codex_session_history {
+        let migration_settings = saved.clone();
+        tauri::async_runtime::spawn_blocking(move || {
+            if let Err(err) = history_migration::maybe_migrate(&migration_settings) {
+                eprintln!("统一 Codex 会话历史迁移失败: {err}");
+            }
+        });
+    } else {
+        history_migration::clear_marker()?;
+    }
+    Ok(saved)
 }
 
 fn normalize_settings_for_save(mut settings: AppSettings) -> AppSettings {
@@ -92,11 +128,7 @@ fn normalize_settings_for_save(mut settings: AppSettings) -> AppSettings {
     settings.codex_binary_path = normalize_optional_string(settings.codex_binary_path);
     settings.codex_data_dir = normalize_optional_string(settings.codex_data_dir);
     if settings.access_mode == CodexAccessMode::Official {
-        settings.api_endpoint = None;
         settings.api_key = None;
-        settings.api_model = "gpt-5".to_string();
-        settings.reasoning_effort = ReasoningEffort::Medium;
-        settings.speed_mode = ApiSpeedMode::Balanced;
     } else {
         settings.api_endpoint = normalize_api_endpoint(settings.api_endpoint);
         settings.api_key = normalize_optional_string(settings.api_key);
@@ -220,6 +252,7 @@ fn normalize_api_endpoint(value: Option<String>) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::models::{ApiSpeedMode, ReasoningEffort};
 
     #[test]
     fn api_endpoint_normalization_adds_single_v1() {
@@ -239,7 +272,7 @@ mod tests {
     }
 
     #[test]
-    fn official_settings_clear_relay_fields_before_save() {
+    fn official_settings_keep_relay_preferences_but_drop_one_time_key() {
         let settings = AppSettings {
             access_mode: CodexAccessMode::Official,
             api_endpoint: Some("https://api.example.com/v1".to_string()),
@@ -253,10 +286,13 @@ mod tests {
         let normalized = normalize_settings_for_save(settings);
 
         assert_eq!(normalized.access_mode, CodexAccessMode::Official);
-        assert_eq!(normalized.api_endpoint, None);
+        assert_eq!(
+            normalized.api_endpoint.as_deref(),
+            Some("https://api.example.com/v1")
+        );
         assert_eq!(normalized.api_key, None);
-        assert_eq!(normalized.api_model, "gpt-5");
-        assert_eq!(normalized.reasoning_effort, ReasoningEffort::Medium);
-        assert_eq!(normalized.speed_mode, ApiSpeedMode::Balanced);
+        assert_eq!(normalized.api_model, "relay-model");
+        assert_eq!(normalized.reasoning_effort, ReasoningEffort::Extreme);
+        assert_eq!(normalized.speed_mode, ApiSpeedMode::Fast);
     }
 }
