@@ -10,10 +10,24 @@ permissions:
   contents: read
 
 jobs:
-  build-arm64-dmg:
-    name: Build Apple Silicon DMG
+  build-dmg:
+    name: Build ${{ matrix.name }} DMG
     runs-on: macos-14
     timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Apple Silicon
+            target: aarch64-apple-darwin
+            arch: aarch64
+          - name: Intel
+            target: x86_64-apple-darwin
+            arch: x86_64
+
+    env:
+      MACOS_TARGET: ${{ matrix.target }}
+      MACOS_ARCH: ${{ matrix.arch }}
 
     steps:
       - name: Check out repository
@@ -28,12 +42,13 @@ jobs:
       - name: Set up Rust
         uses: dtolnay/rust-toolchain@stable
         with:
-          targets: aarch64-apple-darwin
+          targets: ${{ matrix.target }}
 
       - name: Cache Rust build
         uses: Swatinem/rust-cache@v2
         with:
           workspaces: src-tauri -> target
+          shared-key: macos-${{ matrix.target }}
 
       - name: Install frontend dependencies
         run: npm ci
@@ -41,25 +56,50 @@ jobs:
       - name: Run frontend tests
         run: npm test
 
+      - name: Run Rust tests on macOS
+        run: cargo test --manifest-path src-tauri/Cargo.toml
+
       - name: Build macOS application
-        run: npm run tauri build -- --target aarch64-apple-darwin --bundles app
+        run: npm run tauri build -- --target "$MACOS_TARGET" --bundles app
 
       - name: Ad-hoc sign application
-        run: codesign --force --deep --sign - src-tauri/target/aarch64-apple-darwin/release/bundle/macos/codex-qianzong.app
+        run: codesign --force --deep --sign - "src-tauri/target/$MACOS_TARGET/release/bundle/macos/codex-qianzong.app"
 
       - name: Create tester DMG
         run: |
           mkdir -p dist-artifacts
+          DMG_ROOT="$(mktemp -d "$RUNNER_TEMP/codex-qianzong-dmg.XXXXXX")"
+
+          ditto \
+            "src-tauri/target/$MACOS_TARGET/release/bundle/macos/codex-qianzong.app" \
+            "$DMG_ROOT/codex-qianzong.app"
+          ln -s /Applications "$DMG_ROOT/Applications"
+
           hdiutil create \
             -volname codex-qianzong \
-            -srcfolder src-tauri/target/aarch64-apple-darwin/release/bundle/macos/codex-qianzong.app \
+            -srcfolder "$DMG_ROOT" \
             -format UDZO \
-            dist-artifacts/codex-qianzong_1.5.0_aarch64-test.dmg
+            "dist-artifacts/codex-qianzong_1.5.0_$MACOS_ARCH-test.dmg"
+
+      - name: Verify DMG installer layout
+        run: |
+          DMG_PATH="dist-artifacts/codex-qianzong_1.5.0_$MACOS_ARCH-test.dmg"
+          MOUNT_POINT="$(mktemp -d "$RUNNER_TEMP/codex-qianzong-mount.XXXXXX")"
+
+          hdiutil attach -readonly -nobrowse -mountpoint "$MOUNT_POINT" "$DMG_PATH"
+          trap 'hdiutil detach "$MOUNT_POINT" >/dev/null 2>&1 || true' EXIT
+
+          test -d "$MOUNT_POINT/codex-qianzong.app"
+          test -L "$MOUNT_POINT/Applications"
+          test "$(readlink "$MOUNT_POINT/Applications")" = "/Applications"
+
+          hdiutil detach "$MOUNT_POINT"
+          trap - EXIT
 
       - name: Upload DMG artifact
         uses: actions/upload-artifact@v4
         with:
-          name: codex-qianzong-macos-aarch64-dmg
-          path: dist-artifacts/codex-qianzong_1.5.0_aarch64-test.dmg
+          name: codex-qianzong-macos-${{ matrix.arch }}-dmg
+          path: dist-artifacts/codex-qianzong_1.5.0_${{ matrix.arch }}-test.dmg
           if-no-files-found: error
           retention-days: 14

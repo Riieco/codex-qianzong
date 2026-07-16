@@ -3,7 +3,7 @@ use crate::{
     codex_config::{LEGACY_RELAY_PROVIDER_ID, SHARED_PROVIDER_ID},
     error::{AppError, AppResult},
     models::AppSettings,
-    paths,
+    paths, process_guard,
 };
 use chrono::{Local, Utc};
 use rusqlite::{backup::Backup, Connection};
@@ -66,6 +66,7 @@ pub fn maybe_migrate(settings: &AppSettings) -> AppResult<HistoryMigrationOutcom
     if marker_matches(&codex_dir_key)? {
         return Ok(skipped_migration("already_migrated"));
     }
+    process_guard::ensure_codex_not_running()?;
 
     let generation = create_generation_dir("unified-v1")?;
     let mut manifest = MigrationManifest {
@@ -98,6 +99,19 @@ pub fn maybe_migrate(settings: &AppSettings) -> AppResult<HistoryMigrationOutcom
         migrated_state_rows,
         skipped_reason: None,
     })
+}
+
+pub fn preflight(settings: &AppSettings) -> AppResult<()> {
+    if !settings.unify_codex_session_history || !settings.unify_codex_migrate_existing {
+        return Ok(());
+    }
+    let Some(codex_dir) = paths::detect_codex_data_dir(settings) else {
+        return Ok(());
+    };
+    if marker_matches(&canonical_dir_string(&codex_dir))? {
+        return Ok(());
+    }
+    process_guard::ensure_codex_not_running()
 }
 
 pub fn clear_marker() -> AppResult<()> {
@@ -555,11 +569,7 @@ fn write_bytes_atomic(path: &Path, bytes: &[u8]) -> AppResult<()> {
 }
 
 fn canonical_dir_string(path: &Path) -> String {
-    path.canonicalize()
-        .unwrap_or_else(|_| path.to_path_buf())
-        .to_string_lossy()
-        .replace('\\', "/")
-        .to_ascii_lowercase()
+    paths::canonical_path_key(path)
 }
 
 #[cfg(test)]

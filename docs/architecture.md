@@ -60,11 +60,12 @@ Command return values are serializable Rust structs that mirror the TypeScript t
 - Account-level 7-day/30-day trends prefer Codex app-server `account/usage/read`.
 - Token value cards and membership-period value progress prefer local JSONL `token_count` parsing because it exposes uncached input, cached input, and output token splits for official API-price estimation. Official aggregate usage is only a fallback for value when JSONL details are unavailable.
 - Access mode settings control UI state, dashboard data-source selection, and Codex `config.toml` synchronization. Official native mode keeps official account/app-server reads; API relay mode uses local SQLite/JSONL statistics.
-- Optional unified history gives official and relay modes the same managed provider ID (`qianzong_unified`) so Codex can resume sessions created in either mode. Existing JSONL metadata and SQLite thread rows are migrated only when the user explicitly enables migration.
+- Optional unified history gives official and relay modes on the same machine the same managed provider ID (`qianzong_unified`) so Codex can resume sessions created in either mode. It is not cross-device synchronization. Existing JSONL metadata and SQLite thread rows are migrated only when the user explicitly enables migration and Codex is not running.
 
 ## Security Notes
 
 - Usage aggregation opens SQLite read-only. Explicit unified-history migration opens Codex state databases read/write with a busy timeout, backup API snapshot, and transaction.
+- Codex data-directory resolution is shared by config/auth and history operations: an explicit app setting wins, followed by `CODEX_HOME`, then `~/.codex`.
 - Shell execution is limited to `codex app-server` and opening the app log folder.
 - The UI receives diagnostics and sanitized status, not raw secrets.
 - Global shortcut permissions are declared in Tauri capabilities.

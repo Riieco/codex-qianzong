@@ -107,16 +107,17 @@ pub async fn restore_unified_history() -> AppResult<HistoryRestoreOutcome> {
 #[tauri::command]
 pub async fn save_app_settings(settings: AppSettings) -> AppResult<AppSettings> {
     let mut settings = normalize_settings_for_save(settings);
+    history_migration::preflight(&settings)?;
     sync_codex_config(&settings)?;
     settings.api_key = None;
     let saved = write_settings(&settings)?;
     if saved.unify_codex_session_history {
         let migration_settings = saved.clone();
         tauri::async_runtime::spawn_blocking(move || {
-            if let Err(err) = history_migration::maybe_migrate(&migration_settings) {
-                eprintln!("统一 Codex 会话历史迁移失败: {err}");
-            }
-        });
+            history_migration::maybe_migrate(&migration_settings)
+        })
+        .await
+        .map_err(|err| AppError::Process(format!("后台迁移会话历史失败: {err}")))??;
     } else {
         history_migration::clear_marker()?;
     }

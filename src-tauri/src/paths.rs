@@ -99,16 +99,59 @@ fn is_windowsapps_path(path: &Path) -> bool {
 }
 
 pub fn detect_codex_data_dir(settings: &AppSettings) -> Option<PathBuf> {
-    if let Some(path) = settings.codex_data_dir.as_deref() {
-        let candidate = PathBuf::from(path);
-        if candidate.exists() {
-            return Some(candidate);
+    resolve_codex_data_dir(settings)
+        .ok()
+        .filter(|path| path.exists())
+}
+
+pub fn resolve_codex_data_dir(settings: &AppSettings) -> AppResult<PathBuf> {
+    resolve_codex_data_dir_from(
+        settings.codex_data_dir.as_deref(),
+        env::var_os("CODEX_HOME").as_deref(),
+        dirs::home_dir().as_deref(),
+    )
+}
+
+pub fn canonical_path_key(path: &Path) -> String {
+    let normalized = path
+        .canonicalize()
+        .unwrap_or_else(|_| path.to_path_buf())
+        .to_string_lossy()
+        .replace('\\', "/");
+    if cfg!(windows) {
+        normalized.to_ascii_lowercase()
+    } else {
+        normalized
+    }
+}
+
+fn resolve_codex_data_dir_from(
+    configured: Option<&str>,
+    codex_home: Option<&std::ffi::OsStr>,
+    home: Option<&Path>,
+) -> AppResult<PathBuf> {
+    if let Some(path) = configured.map(str::trim).filter(|path| !path.is_empty()) {
+        return Ok(expand_home_path(path, home));
+    }
+    if let Some(path) = codex_home.filter(|path| !path.is_empty()) {
+        return Ok(PathBuf::from(path));
+    }
+    home.map(|path| path.join(".codex"))
+        .ok_or_else(|| AppError::Config("无法定位 Codex 数据目录".to_string()))
+}
+
+fn expand_home_path(path: &str, home: Option<&Path>) -> PathBuf {
+    if path == "~" {
+        return home
+            .map(Path::to_path_buf)
+            .unwrap_or_else(|| PathBuf::from(path));
+    }
+    if let Some(suffix) = path.strip_prefix("~/").or_else(|| path.strip_prefix("~\\")) {
+        if let Some(home) = home {
+            return home.join(suffix);
         }
     }
-
-    dirs::home_dir()
-        .map(|home| home.join(".codex"))
-        .filter(|path| path.exists())
+    PathBuf::from(path)
 }
 
 pub fn detect_state_db(codex_dir: &Path) -> Option<PathBuf> {
@@ -142,6 +185,33 @@ mod tests {
         assert!(!is_windowsapps_path(Path::new(
             r"C:\Users\me\.codex\.sandbox-bin\codex.exe"
         )));
+    }
+
+    #[test]
+    fn codex_data_dir_prefers_setting_then_environment_then_home() {
+        let home = Path::new("/Users/tester");
+        assert_eq!(
+            resolve_codex_data_dir_from(
+                Some("~/custom-codex"),
+                Some(std::ffi::OsStr::new("/tmp/env-codex")),
+                Some(home),
+            )
+            .unwrap(),
+            home.join("custom-codex")
+        );
+        assert_eq!(
+            resolve_codex_data_dir_from(
+                None,
+                Some(std::ffi::OsStr::new("/tmp/env-codex")),
+                Some(home),
+            )
+            .unwrap(),
+            PathBuf::from("/tmp/env-codex")
+        );
+        assert_eq!(
+            resolve_codex_data_dir_from(None, None, Some(home)).unwrap(),
+            home.join(".codex")
+        );
     }
 
     #[cfg(windows)]

@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { getAppSettings, getUsageSnapshot, saveAppSettings, setAlwaysOnTop } from "./lib/api";
 import { selectDashboardData } from "./lib/dashboardData";
+import { formatError } from "./lib/errors";
 import { defaultSettings } from "./lib/mock";
 import type { AppSettings, UsageSnapshot } from "./types/usage";
 import { EnvironmentPanel } from "./components/EnvironmentPanel";
@@ -28,7 +29,7 @@ export function App() {
     try {
       setSnapshot(await getUsageSnapshot());
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
+      setError(formatError(err));
     } finally {
       setIsRefreshing(false);
     }
@@ -41,7 +42,7 @@ export function App() {
     try {
       await setAlwaysOnTop(saved.alwaysOnTop);
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
+      setError(formatError(err));
     }
     void refresh();
   }

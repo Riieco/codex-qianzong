@@ -11,6 +11,7 @@ import {
   restoreCodexConfigBackup,
   restoreUnifiedHistory,
 } from "../lib/api";
+import { formatError } from "../lib/errors";
 import type {
   ApiSpeedMode,
   AppSettings,
@@ -58,7 +59,7 @@ export function SettingsDrawer({ settings, onClose, onSave }: SettingsDrawerProp
         current && next.some((backup) => backup.id === current) ? current : next[0]?.id || "",
       );
     } catch (err) {
-      setBackupStatus(err instanceof Error ? err.message : String(err));
+      setBackupStatus(formatError(err));
     }
   }
 
@@ -69,7 +70,7 @@ export function SettingsDrawer({ settings, onClose, onSave }: SettingsDrawerProp
       await onSave(draft);
       onClose();
     } catch (err) {
-      setSaveError(err instanceof Error ? err.message : String(err));
+      setSaveError(formatError(err));
       setIsSaving(false);
     }
   }
@@ -84,7 +85,7 @@ export function SettingsDrawer({ settings, onClose, onSave }: SettingsDrawerProp
       setSelectedBackupId(next[0]?.id || "");
       setBackupStatus("已保存当前 Codex 配置备份");
     } catch (err) {
-      setBackupStatus(err instanceof Error ? err.message : String(err));
+      setBackupStatus(formatError(err));
     } finally {
       setIsBackupBusy(false);
     }
@@ -100,7 +101,7 @@ export function SettingsDrawer({ settings, onClose, onSave }: SettingsDrawerProp
       setBackups(next);
       setBackupStatus("已恢复所选 Codex 配置备份，建议重启 Codex");
     } catch (err) {
-      setBackupStatus(err instanceof Error ? err.message : String(err));
+      setBackupStatus(formatError(err));
     } finally {
       setIsBackupBusy(false);
     }
@@ -117,7 +118,7 @@ export function SettingsDrawer({ settings, onClose, onSave }: SettingsDrawerProp
       setSelectedBackupId(next[0]?.id || "");
       setBackupStatus("已删除所选配置备份");
     } catch (err) {
-      setBackupStatus(err instanceof Error ? err.message : String(err));
+      setBackupStatus(formatError(err));
     } finally {
       setIsBackupBusy(false);
     }
@@ -132,7 +133,7 @@ export function SettingsDrawer({ settings, onClose, onSave }: SettingsDrawerProp
     try {
       setCredentialStatus(await clearRelayApiKey());
     } catch (err) {
-      setSaveError(err instanceof Error ? err.message : String(err));
+      setSaveError(formatError(err));
     } finally {
       setIsCredentialBusy(false);
     }
@@ -153,7 +154,7 @@ export function SettingsDrawer({ settings, onClose, onSave }: SettingsDrawerProp
       );
       setHasHistoryBackup(await hasUnifiedHistoryBackup());
     } catch (err) {
-      setSaveError(err instanceof Error ? err.message : String(err));
+      setSaveError(formatError(err));
     } finally {
       setIsCredentialBusy(false);
     }
@@ -487,7 +488,7 @@ export function SettingsDrawer({ settings, onClose, onSave }: SettingsDrawerProp
         </div>
         <p className="settings-hint">
           开启后官方原生与 API 中转使用同一个恢复历史；迁移已有会话会先备份 JSONL 和
-          state_5.sqlite。
+          state_5.sqlite。迁移时必须先完全退出 Codex。
         </p>
         {!settings.unifyCodexSessionHistory && hasHistoryBackup && (
           <button

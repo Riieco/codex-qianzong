@@ -32,16 +32,23 @@ struct CodexConfigBackupManifest {
 }
 
 pub fn sync_codex_config(settings: &AppSettings) -> AppResult<()> {
-    let config_path = codex_config_path()?;
-    let auth_path = codex_auth_path()?;
+    let codex_dir = paths::resolve_codex_data_dir(settings)?;
+    let config_path = codex_config_path(&codex_dir);
+    let auth_path = codex_auth_path(&codex_dir);
     let restore_path = restore_snapshot_path()?;
-    ensure_default_backup_for_paths(&config_path, &auth_path)?;
+    ensure_default_backup_for_paths(&codex_dir, &config_path, &auth_path)?;
+    let official_auth_fallback = if settings.access_mode == CodexAccessMode::Official {
+        find_official_auth_fallback(&codex_dir, &auth_path)?
+    } else {
+        None
+    };
     sync_codex_config_for_paths(
         settings,
         &config_path,
         &auth_path,
         &restore_path,
         &SystemAuthVault,
+        official_auth_fallback.as_ref(),
     )
 }
 
@@ -54,17 +61,20 @@ pub fn clear_stored_relay_api_key() -> AppResult<AuthCredentialStatus> {
 }
 
 pub fn capture_current_official_auth() -> AppResult<()> {
-    capture_current_auth_to_vault(&codex_auth_path()?, &SystemAuthVault)
+    let codex_dir = active_codex_data_dir()?;
+    capture_current_auth_to_vault(&codex_auth_path(&codex_dir), &SystemAuthVault)
 }
 
-fn codex_config_path() -> AppResult<PathBuf> {
-    let home = dirs::home_dir().ok_or_else(|| AppError::Config("无法定位用户主目录".into()))?;
-    Ok(home.join(".codex").join("config.toml"))
+fn active_codex_data_dir() -> AppResult<PathBuf> {
+    paths::resolve_codex_data_dir(&crate::settings::read_settings().unwrap_or_default())
 }
 
-fn codex_auth_path() -> AppResult<PathBuf> {
-    let home = dirs::home_dir().ok_or_else(|| AppError::Config("无法定位用户主目录".into()))?;
-    Ok(home.join(".codex").join("auth.json"))
+fn codex_config_path(codex_dir: &Path) -> PathBuf {
+    codex_dir.join("config.toml")
+}
+
+fn codex_auth_path(codex_dir: &Path) -> PathBuf {
+    codex_dir.join("auth.json")
 }
 
 fn restore_snapshot_path() -> AppResult<PathBuf> {
@@ -81,10 +91,17 @@ fn sync_codex_config_for_paths(
     auth_path: &Path,
     restore_path: &Path,
     vault: &dyn AuthVaultStore,
+    official_auth_fallback: Option<&Map<String, Value>>,
 ) -> AppResult<()> {
     let original = read_optional_text(config_path)?;
     let original_auth = read_optional_text(auth_path)?;
-    let next_auth = prepare_codex_auth(settings, &original, &original_auth, vault)?;
+    let next_auth = prepare_codex_auth(
+        settings,
+        &original,
+        &original_auth,
+        vault,
+        official_auth_fallback,
+    )?;
 
     let next_text = match settings.access_mode {
         CodexAccessMode::Relay => {
@@ -111,14 +128,16 @@ fn sync_codex_config_for_paths(
 }
 
 pub fn ensure_default_codex_config_backup() -> AppResult<()> {
-    let config_path = codex_config_path()?;
-    let auth_path = codex_auth_path()?;
-    ensure_default_backup_for_paths(&config_path, &auth_path)
+    let codex_dir = active_codex_data_dir()?;
+    let config_path = codex_config_path(&codex_dir);
+    let auth_path = codex_auth_path(&codex_dir);
+    ensure_default_backup_for_paths(&codex_dir, &config_path, &auth_path)
 }
 
 pub fn list_codex_config_backups() -> AppResult<Vec<CodexConfigBackup>> {
+    let codex_dir = active_codex_data_dir()?;
     ensure_default_codex_config_backup()?;
-    let mut backups = read_backup_manifests()?;
+    let mut backups = read_backup_manifests(&codex_dir)?;
     backups.sort_by(|a, b| {
         b.is_default
             .cmp(&a.is_default)
@@ -128,8 +147,9 @@ pub fn list_codex_config_backups() -> AppResult<Vec<CodexConfigBackup>> {
 }
 
 pub fn create_codex_config_backup(label: Option<String>) -> AppResult<Vec<CodexConfigBackup>> {
-    let config_path = codex_config_path()?;
-    let auth_path = codex_auth_path()?;
+    let codex_dir = active_codex_data_dir()?;
+    let config_path = codex_config_path(&codex_dir);
+    let auth_path = codex_auth_path(&codex_dir);
     let timestamp = Local::now().format("%Y%m%d%H%M%S%3f").to_string();
     let label = label
         .and_then(|value| {
@@ -141,6 +161,7 @@ pub fn create_codex_config_backup(label: Option<String>) -> AppResult<Vec<CodexC
         &format!("manual-{timestamp}"),
         &label,
         false,
+        &codex_dir,
         &config_path,
         &auth_path,
     )?;
@@ -148,10 +169,11 @@ pub fn create_codex_config_backup(label: Option<String>) -> AppResult<Vec<CodexC
 }
 
 pub fn restore_codex_config_backup(id: &str) -> AppResult<Vec<CodexConfigBackup>> {
-    let backup_dir = backup_dir_for_id(id)?;
+    let codex_dir = active_codex_data_dir()?;
+    let backup_dir = backup_dir_for_id(&codex_dir, id)?;
     let manifest = read_backup_manifest(&backup_dir)?;
-    let config_path = codex_config_path()?;
-    let auth_path = codex_auth_path()?;
+    let config_path = codex_config_path(&codex_dir);
+    let auth_path = codex_auth_path(&codex_dir);
 
     restore_snapshot_entry(
         &backup_dir.join("config.toml"),
@@ -172,7 +194,8 @@ pub fn restore_codex_config_backup(id: &str) -> AppResult<Vec<CodexConfigBackup>
 }
 
 pub fn delete_codex_config_backup(id: &str) -> AppResult<Vec<CodexConfigBackup>> {
-    let backup_dir = backup_dir_for_id(id)?;
+    let codex_dir = active_codex_data_dir()?;
+    let backup_dir = backup_dir_for_id(&codex_dir, id)?;
     let manifest = read_backup_manifest(&backup_dir)?;
     if manifest.is_default || manifest.id == DEFAULT_BACKUP_ID {
         return Err(AppError::Config("默认配置备份不能删除".into()));
@@ -181,8 +204,12 @@ pub fn delete_codex_config_backup(id: &str) -> AppResult<Vec<CodexConfigBackup>>
     list_codex_config_backups()
 }
 
-fn ensure_default_backup_for_paths(config_path: &Path, auth_path: &Path) -> AppResult<()> {
-    let backup_dir = backup_dir_for_id(DEFAULT_BACKUP_ID)?;
+fn ensure_default_backup_for_paths(
+    codex_dir: &Path,
+    config_path: &Path,
+    auth_path: &Path,
+) -> AppResult<()> {
+    let backup_dir = backup_dir_for_id(codex_dir, DEFAULT_BACKUP_ID)?;
     if backup_dir.join("manifest.json").exists() {
         return Ok(());
     }
@@ -190,37 +217,56 @@ fn ensure_default_backup_for_paths(config_path: &Path, auth_path: &Path) -> AppR
         DEFAULT_BACKUP_ID,
         DEFAULT_BACKUP_LABEL,
         true,
+        codex_dir,
         config_path,
         auth_path,
     )
 }
 
-fn backup_root_dir() -> AppResult<PathBuf> {
+fn backup_root_dir(codex_dir: &Path) -> AppResult<PathBuf> {
     let app_dir = paths::app_log_dir()?
         .parent()
         .map(Path::to_path_buf)
         .unwrap_or_else(|| PathBuf::from("."));
-    Ok(app_dir.join("codex-config-backups"))
+    let root = app_dir.join("codex-config-backups");
+    let default_dir = dirs::home_dir().map(|home| home.join(".codex"));
+    if default_dir
+        .as_deref()
+        .is_some_and(|path| paths::canonical_path_key(path) == paths::canonical_path_key(codex_dir))
+    {
+        Ok(root)
+    } else {
+        Ok(root.join(format!("profile-{:016x}", stable_path_hash(codex_dir))))
+    }
 }
 
-fn backup_dir_for_id(id: &str) -> AppResult<PathBuf> {
+fn stable_path_hash(path: &Path) -> u64 {
+    paths::canonical_path_key(path)
+        .bytes()
+        .fold(0xcbf29ce484222325, |hash, byte| {
+            (hash ^ u64::from(byte)).wrapping_mul(0x100000001b3)
+        })
+}
+
+fn backup_dir_for_id(codex_dir: &Path, id: &str) -> AppResult<PathBuf> {
     if !id
         .chars()
         .all(|ch| ch.is_ascii_alphanumeric() || ch == '-' || ch == '_')
     {
         return Err(AppError::Config("备份 ID 不合法".into()));
     }
-    Ok(backup_root_dir()?.join(id))
+    Ok(backup_root_dir(codex_dir)?.join(id))
 }
 
 fn create_backup_snapshot(
     id: &str,
     label: &str,
     is_default: bool,
+    codex_dir: &Path,
     config_path: &Path,
     auth_path: &Path,
 ) -> AppResult<()> {
-    let backup_dir = backup_dir_for_id(id)?;
+    let backup_dir = backup_dir_for_id(codex_dir, id)?;
     fs::create_dir_all(&backup_dir)?;
 
     let has_config = copy_if_exists(config_path, &backup_dir.join("config.toml"))?;
@@ -281,8 +327,8 @@ fn restore_snapshot_entry(
     }
 }
 
-fn read_backup_manifests() -> AppResult<Vec<CodexConfigBackup>> {
-    let root = backup_root_dir()?;
+fn read_backup_manifests(codex_dir: &Path) -> AppResult<Vec<CodexConfigBackup>> {
+    let root = backup_root_dir(codex_dir)?;
     if !root.exists() {
         return Ok(Vec::new());
     }
@@ -363,10 +409,16 @@ fn prepare_codex_auth(
     current_config: &str,
     current_auth: &str,
     vault: &dyn AuthVaultStore,
+    official_auth_fallback: Option<&Map<String, Value>>,
 ) -> AppResult<Map<String, Value>> {
     let current = parse_auth_json(current_auth)?;
     let mut data = vault.load()?;
     let mut vault_changed = data.capture_official_auth(&current);
+    if data.official_auth_map().is_none() {
+        if let Some(fallback) = official_auth_fallback {
+            vault_changed |= data.capture_official_auth(fallback);
+        }
+    }
 
     let next = match settings.access_mode {
         CodexAccessMode::Relay => {
@@ -447,6 +499,45 @@ fn prepare_codex_auth(
         vault.save(&data)?;
     }
     Ok(next)
+}
+
+fn find_official_auth_fallback(
+    codex_dir: &Path,
+    auth_path: &Path,
+) -> AppResult<Option<Map<String, Value>>> {
+    let mut candidates = vec![backup_dir_for_id(codex_dir, DEFAULT_BACKUP_ID)?.join("auth.json")];
+    if let Ok(entries) = fs::read_dir(codex_dir) {
+        let mut automatic = entries
+            .flatten()
+            .map(|entry| entry.path())
+            .filter(|path| {
+                path.file_name()
+                    .and_then(|name| name.to_str())
+                    .is_some_and(|name| name.starts_with("auth.json.qianzong-backup-"))
+            })
+            .collect::<Vec<_>>();
+        automatic.sort_by(|a, b| b.file_name().cmp(&a.file_name()));
+        candidates.extend(automatic);
+    }
+
+    for path in candidates {
+        if path == auth_path || !path.is_file() {
+            continue;
+        }
+        if let Some(auth) = read_official_auth_candidate(&path) {
+            return Ok(Some(auth));
+        }
+    }
+    Ok(None)
+}
+
+fn read_official_auth_candidate(path: &Path) -> Option<Map<String, Value>> {
+    let text = fs::read_to_string(path).ok()?;
+    let auth = parse_auth_json(&text).ok()?;
+    let mut data = crate::auth_vault::AuthVaultData::default();
+    data.capture_official_auth(&auth)
+        .then(|| data.official_auth_map())
+        .flatten()
 }
 
 fn capture_current_auth_to_vault(auth_path: &Path, vault: &dyn AuthVaultStore) -> AppResult<()> {
@@ -658,6 +749,7 @@ mod tests {
             auth_path,
             restore_path,
             &MemoryAuthVault::default(),
+            None,
         )
     }
 
@@ -903,17 +995,30 @@ base_url = "https://api.example.com/v1"
             api_key: Some("sk-first".into()),
             ..AppSettings::default()
         };
-        sync_codex_config_for_paths(&first, &config_path, &auth_path, &restore_path, &vault)
-            .unwrap();
+        sync_codex_config_for_paths(
+            &first,
+            &config_path,
+            &auth_path,
+            &restore_path,
+            &vault,
+            None,
+        )
+        .unwrap();
 
         let changed = AppSettings {
             api_endpoint: Some("https://second.example.com/v1".into()),
             api_key: None,
             ..first
         };
-        let err =
-            sync_codex_config_for_paths(&changed, &config_path, &auth_path, &restore_path, &vault)
-                .unwrap_err();
+        let err = sync_codex_config_for_paths(
+            &changed,
+            &config_path,
+            &auth_path,
+            &restore_path,
+            &vault,
+            None,
+        )
+        .unwrap_err();
 
         assert!(err.to_string().contains("API 地址已变化"));
         assert_eq!(
@@ -948,8 +1053,15 @@ base_url = "https://api.example.com/v1"
             unify_codex_session_history: true,
             ..AppSettings::default()
         };
-        sync_codex_config_for_paths(&relay, &config_path, &auth_path, &restore_path, &vault)
-            .unwrap();
+        sync_codex_config_for_paths(
+            &relay,
+            &config_path,
+            &auth_path,
+            &restore_path,
+            &vault,
+            None,
+        )
+        .unwrap();
         let relay_auth = fs::read_to_string(&auth_path).unwrap();
         assert!(relay_auth.contains(r#""OPENAI_API_KEY": "sk-relay""#));
         assert!(!relay_auth.contains("refresh_token"));
@@ -961,13 +1073,62 @@ base_url = "https://api.example.com/v1"
             unify_codex_session_history: true,
             ..relay
         };
-        sync_codex_config_for_paths(&official, &config_path, &auth_path, &restore_path, &vault)
-            .unwrap();
+        sync_codex_config_for_paths(
+            &official,
+            &config_path,
+            &auth_path,
+            &restore_path,
+            &vault,
+            None,
+        )
+        .unwrap();
         let official_auth = fs::read_to_string(&auth_path).unwrap();
         assert!(official_auth.contains(r#""auth_mode": "chatgpt""#));
         assert!(official_auth.contains(r#""refresh_token": "refresh""#));
         assert!(official_auth.contains(r#""account_id": "acct""#));
         assert!(official_auth.contains(r#""OPENAI_API_KEY": null"#));
+    }
+
+    #[test]
+    fn official_mode_recovers_auth_from_backup_when_vault_is_empty() {
+        let vault = MemoryAuthVault::default();
+        let fallback = serde_json::json!({
+            "auth_mode": "chatgpt",
+            "tokens": {
+                "access_token": "access",
+                "refresh_token": "refresh",
+                "account_id": "acct"
+            },
+            "last_refresh": "2026-07-16T00:00:00Z"
+        })
+        .as_object()
+        .unwrap()
+        .clone();
+        let settings = AppSettings {
+            access_mode: CodexAccessMode::Official,
+            ..AppSettings::default()
+        };
+
+        let restored = prepare_codex_auth(
+            &settings,
+            r#"model_provider = "qianzong_relay""#,
+            r#"{"auth_mode":"apikey","OPENAI_API_KEY":"sk-relay"}"#,
+            &vault,
+            Some(&fallback),
+        )
+        .unwrap();
+
+        assert_eq!(
+            restored.get("auth_mode").and_then(Value::as_str),
+            Some("chatgpt")
+        );
+        assert_eq!(
+            Value::Object(restored.clone())
+                .pointer("/tokens/refresh_token")
+                .and_then(Value::as_str),
+            Some("refresh")
+        );
+        assert!(vault.snapshot().status().has_stored_official_auth);
     }
 
     #[test]
@@ -994,7 +1155,7 @@ base_url = "https://api.example.com/v1"
 
     #[test]
     fn backup_id_validation_rejects_path_traversal() {
-        let err = backup_dir_for_id("../manual").unwrap_err();
+        let err = backup_dir_for_id(Path::new("/tmp/.codex"), "../manual").unwrap_err();
         assert!(err.to_string().contains("备份 ID 不合法"));
     }
 

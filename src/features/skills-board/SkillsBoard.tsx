@@ -1,4 +1,13 @@
-import { Ban, FolderOpen, Languages, Power, RefreshCw, Search, ShieldCheck, Trash2 } from "lucide-react";
+import {
+  Ban,
+  FolderOpen,
+  Languages,
+  Power,
+  RefreshCw,
+  Search,
+  ShieldCheck,
+  Trash2,
+} from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 import {
   archiveSkill,
@@ -8,6 +17,7 @@ import {
   openSkillFolder,
   translateDescriptionToChinese,
 } from "./api";
+import { formatError } from "../../lib/errors";
 import type { SkillBoardData, SkillSummary } from "./types";
 import "./SkillsBoard.css";
 
@@ -45,7 +55,7 @@ export function SkillsBoard({ enabled }: SkillsBoardProps) {
       setBoard(next);
       setSelectedId((current) => current ?? next.skills[0]?.id ?? null);
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
+      setError(formatError(err));
     } finally {
       setIsLoading(false);
     }
@@ -66,7 +76,7 @@ export function SkillsBoard({ enabled }: SkillsBoardProps) {
         });
       }
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
+      setError(formatError(err));
     } finally {
       setIsBusy(false);
     }
@@ -105,7 +115,7 @@ export function SkillsBoard({ enabled }: SkillsBoardProps) {
       const translated = await translateDescriptionToChinese(selectedSkill.description);
       setTranslatedDescriptions((current) => ({ ...current, [selectedSkill.id]: translated }));
     } catch (err) {
-      setTranslationError(err instanceof Error ? err.message : String(err));
+      setTranslationError(formatError(err));
     } finally {
       setIsTranslating(false);
     }
@@ -252,7 +262,9 @@ export function SkillsBoard({ enabled }: SkillsBoardProps) {
       {(error || (board?.messages.length ?? 0) > 0) && (
         <div className="skills-board-message">
           {error && <strong>{error}</strong>}
-          {board?.messages.map((message) => <span key={message}>{message}</span>)}
+          {board?.messages.map((message) => (
+            <span key={message}>{message}</span>
+          ))}
         </div>
       )}
     </section>
@@ -400,7 +412,9 @@ function SkillDetail({
         <strong>{statusLabel[skill.status]}</strong>
       </div>
       <p>{translating ? "正在使用 Google 翻译..." : description}</p>
-      {translationError && <span className="skills-board-translation-error">{translationError}</span>}
+      {translationError && (
+        <span className="skills-board-translation-error">{translationError}</span>
+      )}
       <dl>
         <div>
           <dt>技能目录</dt>

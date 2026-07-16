@@ -10,6 +10,7 @@ mod local_db;
 mod models;
 mod paths;
 mod pricing;
+mod process_guard;
 mod session_logs;
 mod settings;
 mod skills_board;
