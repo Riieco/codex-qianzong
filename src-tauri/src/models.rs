@@ -337,6 +337,7 @@ pub struct AppSettings {
     pub refresh_interval_secs: u64,
     pub show_task_board: bool,
     pub access_mode: CodexAccessMode,
+    pub api_site_name: String,
     pub api_endpoint: Option<String>,
     #[serde(default, skip_serializing)]
     pub api_key: Option<String>,
@@ -360,6 +361,7 @@ impl Default for AppSettings {
             refresh_interval_secs: 300,
             show_task_board: true,
             access_mode: CodexAccessMode::Official,
+            api_site_name: String::new(),
             api_endpoint: None,
             api_key: None,
             api_model: "gpt-5".to_string(),
@@ -369,6 +371,43 @@ impl Default for AppSettings {
             unify_codex_session_history: false,
             unify_codex_migrate_existing: false,
         }
+    }
+}
+
+pub fn normalize_api_site_name(value: &str) -> String {
+    let trimmed = value.trim();
+    let unprefixed = trimmed
+        .strip_prefix("API：")
+        .or_else(|| trimmed.strip_prefix("API:"))
+        .unwrap_or(trimmed)
+        .trim();
+    let normalized = unprefixed
+        .chars()
+        .filter(|character| !character.is_control())
+        .take(40)
+        .collect::<String>();
+    normalized
+}
+
+pub fn api_provider_display_name(value: &str) -> String {
+    let site_name = normalize_api_site_name(value);
+    if site_name.is_empty() {
+        "API".to_string()
+    } else {
+        format!("API：{site_name}")
+    }
+}
+
+#[cfg(test)]
+mod settings_tests {
+    use super::{api_provider_display_name, normalize_api_site_name};
+
+    #[test]
+    fn api_site_name_is_optional_and_does_not_duplicate_prefix() {
+        assert_eq!(normalize_api_site_name(""), "");
+        assert_eq!(api_provider_display_name(""), "API");
+        assert_eq!(normalize_api_site_name(" API：示例站 "), "示例站");
+        assert_eq!(api_provider_display_name(" API:Example "), "API：Example");
     }
 }
 

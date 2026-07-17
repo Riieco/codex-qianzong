@@ -46,6 +46,10 @@
 - Skills 看板新增启用已禁用技能能力：后端 `enable_skill` 将 `.codex/skills-disabled` 条目移回 `.codex/skills`，前端成功启用后切回 `已启用` 列表。
 - 发布版本号统一更新到 `1.2.0`，并生成 Windows MSI/NSIS 安装包。子项目 `.gitignore` 排除了 `.devlogs` 和 `.dev-logs`，避免本地验证截图和日志进入独立发布仓库。
 
+## 2026-07-17
+
+- API 中转设置新增可选且持久化的站点名字；默认留空，Codex 中显示为 `API`，填写后显示 `API：<站点名字>`。Provider 内部 ID 继续保持 `qianzong_relay` / `qianzong_unified`，避免破坏统一会话历史。
+
 ## 2026-07-16
 
 - 官方原生和 API 中转改为双槽认证：完整官方 `auth.json` 与端点绑定的中转 API Key 存入加密保险箱，主密钥由系统 keyring 保存，设置 IPC 只返回脱敏状态。

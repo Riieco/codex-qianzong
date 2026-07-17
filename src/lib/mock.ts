@@ -28,6 +28,7 @@ export const defaultSettings: AppSettings = {
   refreshIntervalSecs: 300,
   showTaskBoard: true,
   accessMode: "official",
+  apiSiteName: "",
   apiEndpoint: null,
   apiKey: null,
   apiModel: "gpt-5",

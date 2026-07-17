@@ -84,6 +84,7 @@ describe("SettingsDrawer", () => {
       screen.queryByText("接入方式、路径、刷新频率、主题与任务看板行为"),
     ).not.toBeInTheDocument();
     expect(screen.queryByLabelText("API 地址")).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("API 站点名字")).not.toBeInTheDocument();
     expect(screen.queryByLabelText("模型名字")).not.toBeInTheDocument();
     expect(screen.queryByLabelText("推理强度")).not.toBeInTheDocument();
     expect(screen.queryByLabelText("速度策略")).not.toBeInTheDocument();
@@ -120,6 +121,10 @@ describe("SettingsDrawer", () => {
     render(<SettingsDrawer settings={defaultSettings} onClose={onClose} onSave={onSave} />);
 
     fireEvent.change(screen.getByLabelText("当前模式"), { target: { value: "relay" } });
+    expect(screen.getByLabelText("API 站点名字")).toHaveValue("");
+    fireEvent.change(screen.getByLabelText("API 站点名字"), {
+      target: { value: "示例站" },
+    });
     const endpoint = screen.getByLabelText("API 地址") as HTMLInputElement;
     fireEvent.change(endpoint, { target: { value: "api.example.com/v1/v1/" } });
     fireEvent.blur(endpoint);
@@ -130,6 +135,7 @@ describe("SettingsDrawer", () => {
     expect(onSave).toHaveBeenCalledWith(
       expect.objectContaining({
         accessMode: "relay",
+        apiSiteName: "示例站",
         apiEndpoint: "https://api.example.com/v1",
       }),
     );
@@ -143,6 +149,7 @@ describe("SettingsDrawer", () => {
         settings={{
           ...defaultSettings,
           accessMode: "relay",
+          apiSiteName: "已保存站点",
           apiEndpoint: "https://api.example.com/v1",
           apiKey: "sk-test",
           apiModel: "relay-model",
@@ -160,6 +167,7 @@ describe("SettingsDrawer", () => {
     expect(onSave).toHaveBeenCalledWith(
       expect.objectContaining({
         accessMode: "official",
+        apiSiteName: "已保存站点",
         apiEndpoint: "https://api.example.com/v1",
         apiKey: null,
         apiModel: "relay-model",

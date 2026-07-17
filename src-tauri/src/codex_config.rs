@@ -2,7 +2,10 @@ use crate::{
     atomic_file,
     auth_vault::{AuthCredentialStatus, AuthVaultStore, RelayCredential, SystemAuthVault},
     error::{AppError, AppResult},
-    models::{ApiSpeedMode, AppSettings, CodexAccessMode, CodexConfigBackup, ReasoningEffort},
+    models::{
+        api_provider_display_name, ApiSpeedMode, AppSettings, CodexAccessMode, CodexConfigBackup,
+        ReasoningEffort,
+    },
     paths,
 };
 use chrono::Local;
@@ -722,7 +725,10 @@ fn apply_relay_config(doc: &mut DocumentMut, settings: &AppSettings) -> AppResul
 
     let relay = ensure_managed_provider_table(doc, provider_id)?;
     relay.clear();
-    relay.insert("name", value(provider_id));
+    relay.insert(
+        "name",
+        value(api_provider_display_name(&settings.api_site_name)),
+    );
     relay.insert("base_url", value(endpoint));
     relay.insert("wire_api", value("responses"));
     Ok(())
@@ -982,6 +988,7 @@ preferred_auth_method = "chatgpt"
         settings.access_mode = CodexAccessMode::Relay;
         settings.api_endpoint = Some("https://api.example.com/v1".into());
         settings.api_key = Some("sk-test".into());
+        settings.api_site_name = "示例站".into();
         settings.api_model = "gpt-5.4".into();
         settings.reasoning_effort = ReasoningEffort::Extreme;
         settings.speed_mode = ApiSpeedMode::Fast;
@@ -996,6 +1003,7 @@ preferred_auth_method = "chatgpt"
         assert!(text.contains(r#"model_reasoning_effort = "xhigh""#));
         assert!(text.contains(r#"service_tier = "priority""#));
         assert!(text.contains(r#"[model_providers.qianzong_unified]"#));
+        assert!(text.contains(r#"name = "API：示例站""#));
         assert!(text.contains(r#"base_url = "https://api.example.com/v1""#));
         assert!(text.contains(r#"wire_api = "responses""#));
 

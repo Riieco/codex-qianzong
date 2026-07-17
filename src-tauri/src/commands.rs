@@ -12,7 +12,8 @@ use crate::{
     local_db::read_task_board,
     model_catalog,
     models::{
-        AppSettings, CodexAccessMode, CodexConfigBackup, DetectionPaths, TaskBoard, UsageSnapshot,
+        normalize_api_site_name, AppSettings, CodexAccessMode, CodexConfigBackup, DetectionPaths,
+        TaskBoard, UsageSnapshot,
     },
     paths::{app_log_dir, detect_codex_data_dir, detect_state_db},
     settings::{detection_paths, read_settings, write_settings},
@@ -137,6 +138,7 @@ fn normalize_settings_for_save(mut settings: AppSettings) -> AppSettings {
     settings.refresh_interval_secs = settings.refresh_interval_secs.clamp(30, 3600);
     settings.codex_binary_path = normalize_optional_string(settings.codex_binary_path);
     settings.codex_data_dir = normalize_optional_string(settings.codex_data_dir);
+    settings.api_site_name = normalize_api_site_name(&settings.api_site_name);
     if settings.access_mode == CodexAccessMode::Official {
         settings.api_key = None;
     } else {
@@ -285,6 +287,7 @@ mod tests {
     fn official_settings_keep_relay_preferences_but_drop_one_time_key() {
         let settings = AppSettings {
             access_mode: CodexAccessMode::Official,
+            api_site_name: " API：示例站点 ".to_string(),
             api_endpoint: Some("https://api.example.com/v1".to_string()),
             api_key: Some("sk-test".to_string()),
             api_model: "relay-model".to_string(),
@@ -296,6 +299,7 @@ mod tests {
         let normalized = normalize_settings_for_save(settings);
 
         assert_eq!(normalized.access_mode, CodexAccessMode::Official);
+        assert_eq!(normalized.api_site_name, "示例站点");
         assert_eq!(
             normalized.api_endpoint.as_deref(),
             Some("https://api.example.com/v1")

@@ -288,6 +288,16 @@ export function SettingsDrawer({ settings, onClose, onSave }: SettingsDrawerProp
 
         {draft.accessMode === "relay" && (
           <>
+            <label className="relay-site-name-field">
+              API 站点名字
+              <input
+                value={draft.apiSiteName}
+                maxLength={40}
+                placeholder="例如：公司 API"
+                onChange={(event) => setDraft({ ...draft, apiSiteName: event.target.value })}
+              />
+            </label>
+
             <label>
               API 地址
               <input
@@ -426,7 +436,8 @@ export function SettingsDrawer({ settings, onClose, onSave }: SettingsDrawerProp
               </label>
             </div>
             <p className="settings-hint">
-              保存后会同步 API 地址、API Key、模型、推理强度和速度策略到 Codex 配置；快速模式使用
+              保存后会同步站点名字、API 地址、API Key、模型、推理强度和速度策略到 Codex
+              配置；快速模式使用
               service_tier=priority，稳定/均衡不强制服务层。切换认证方式后建议重启 Codex。
             </p>
           </>

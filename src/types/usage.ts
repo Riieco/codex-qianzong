@@ -147,6 +147,7 @@ export interface AppSettings {
   refreshIntervalSecs: number;
   showTaskBoard: boolean;
   accessMode: CodexAccessMode;
+  apiSiteName: string;
   apiEndpoint?: string | null;
   apiKey?: string | null;
   apiModel: string;

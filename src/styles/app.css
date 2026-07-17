@@ -1047,6 +1047,10 @@ h1 {
   white-space: nowrap;
 }
 
+.relay-site-name-field {
+  margin-top: 18px;
+}
+
 .history-toggle-row {
   flex-wrap: nowrap;
   justify-content: flex-start;
