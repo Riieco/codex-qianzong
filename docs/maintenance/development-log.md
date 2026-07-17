@@ -48,7 +48,7 @@
 
 ## 2026-07-17
 
-- API 中转设置新增可选且持久化的站点名字；默认留空，Codex 中显示为 `API`，填写后显示 `API：<站点名字>`。Provider 内部 ID 继续保持 `qianzong_relay` / `qianzong_unified`，避免破坏统一会话历史。
+- API 中转设置新增可选且持久化的站点名字；默认留空且不写 Provider `name`，填写后写入 `API：<站点名字>`。Provider 内部 ID 继续保持 `qianzong_relay` / `qianzong_unified`，避免破坏统一会话历史。
 
 ## 2026-07-16
 

@@ -725,10 +725,9 @@ fn apply_relay_config(doc: &mut DocumentMut, settings: &AppSettings) -> AppResul
 
     let relay = ensure_managed_provider_table(doc, provider_id)?;
     relay.clear();
-    relay.insert(
-        "name",
-        value(api_provider_display_name(&settings.api_site_name)),
-    );
+    if let Some(display_name) = api_provider_display_name(&settings.api_site_name) {
+        relay.insert("name", value(display_name));
+    }
     relay.insert("base_url", value(endpoint));
     relay.insert("wire_api", value("responses"));
     Ok(())
@@ -1017,6 +1016,36 @@ preferred_auth_method = "chatgpt"
             .file_name()
             .to_string_lossy()
             .contains("qianzong-backup")));
+    }
+
+    #[test]
+    fn relay_config_omits_empty_site_name_and_removes_old_name() {
+        let mut doc = parse_config(
+            r#"model_provider = "qianzong_relay"
+
+[model_providers.qianzong_relay]
+name = "API：旧站点"
+base_url = "https://old.example.com/v1"
+wire_api = "responses"
+"#,
+        )
+        .unwrap();
+        let settings = AppSettings {
+            access_mode: CodexAccessMode::Relay,
+            api_endpoint: Some("https://api.example.com/v1".into()),
+            ..AppSettings::default()
+        };
+
+        apply_relay_config(&mut doc, &settings).unwrap();
+
+        let provider = doc["model_providers"][LEGACY_RELAY_PROVIDER_ID]
+            .as_table()
+            .unwrap();
+        assert!(provider.get("name").is_none());
+        assert_eq!(
+            provider.get("base_url").and_then(Item::as_str),
+            Some("https://api.example.com/v1")
+        );
     }
 
     #[test]

@@ -288,15 +288,18 @@ export function SettingsDrawer({ settings, onClose, onSave }: SettingsDrawerProp
 
         {draft.accessMode === "relay" && (
           <>
-            <label className="relay-site-name-field">
-              API 站点名字
-              <input
-                value={draft.apiSiteName}
-                maxLength={40}
-                placeholder="例如：公司 API"
-                onChange={(event) => setDraft({ ...draft, apiSiteName: event.target.value })}
-              />
-            </label>
+            <div className="relay-site-name-block">
+              <label>
+                API 站点名字
+                <input
+                  value={draft.apiSiteName}
+                  maxLength={40}
+                  placeholder="例如：公司 API"
+                  onChange={(event) => setDraft({ ...draft, apiSiteName: event.target.value })}
+                />
+              </label>
+              <p className="settings-hint">此项可选，留空即可。</p>
+            </div>
 
             <label>
               API 地址

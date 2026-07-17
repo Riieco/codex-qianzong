@@ -85,6 +85,7 @@ describe("SettingsDrawer", () => {
     ).not.toBeInTheDocument();
     expect(screen.queryByLabelText("API 地址")).not.toBeInTheDocument();
     expect(screen.queryByLabelText("API 站点名字")).not.toBeInTheDocument();
+    expect(screen.queryByText("此项可选，留空即可。")).not.toBeInTheDocument();
     expect(screen.queryByLabelText("模型名字")).not.toBeInTheDocument();
     expect(screen.queryByLabelText("推理强度")).not.toBeInTheDocument();
     expect(screen.queryByLabelText("速度策略")).not.toBeInTheDocument();
@@ -122,6 +123,7 @@ describe("SettingsDrawer", () => {
 
     fireEvent.change(screen.getByLabelText("当前模式"), { target: { value: "relay" } });
     expect(screen.getByLabelText("API 站点名字")).toHaveValue("");
+    expect(screen.getByText("此项可选，留空即可。")).toBeInTheDocument();
     fireEvent.change(screen.getByLabelText("API 站点名字"), {
       target: { value: "示例站" },
     });
