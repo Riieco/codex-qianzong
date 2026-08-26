@@ -391,7 +391,11 @@ pub fn normalize_api_site_name(value: &str) -> String {
 
 pub fn api_provider_display_name(value: &str) -> Option<String> {
     let site_name = normalize_api_site_name(value);
-    (!site_name.is_empty()).then(|| format!("API：{site_name}"))
+    Some(if site_name.is_empty() {
+        "API".to_string()
+    } else {
+        format!("API：{site_name}")
+    })
 }
 
 #[cfg(test)]
@@ -401,7 +405,7 @@ mod settings_tests {
     #[test]
     fn api_site_name_is_optional_and_does_not_duplicate_prefix() {
         assert_eq!(normalize_api_site_name(""), "");
-        assert_eq!(api_provider_display_name(""), None);
+        assert_eq!(api_provider_display_name("").as_deref(), Some("API"));
         assert_eq!(normalize_api_site_name(" API：示例站 "), "示例站");
         assert_eq!(
             api_provider_display_name(" API:Example ").as_deref(),

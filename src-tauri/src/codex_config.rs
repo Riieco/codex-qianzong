@@ -1021,7 +1021,7 @@ preferred_auth_method = "chatgpt"
     }
 
     #[test]
-    fn relay_config_omits_empty_site_name_and_removes_old_name() {
+    fn relay_config_uses_default_name_for_empty_site_name_and_removes_old_name() {
         let mut doc = parse_config(
             r#"model_provider = "qianzong_relay"
 
@@ -1044,7 +1044,7 @@ wire_api = "responses"
         let provider = doc["model_providers"][LEGACY_RELAY_PROVIDER_ID]
             .as_table()
             .unwrap();
-        assert!(provider.get("name").is_none());
+        assert_eq!(provider.get("name").and_then(Item::as_str), Some("API"));
         assert_eq!(
             provider.get("base_url").and_then(Item::as_str),
             Some("https://api.example.com/v1")

@@ -39,7 +39,7 @@ Notes:
 - **额度窗口监控**：展示 5 小时 / 7 天滚动额度窗口和重置时间。
 - **令牌价值估算**：按官方 API 价格估算今日、近 7 天、累计和当前会员周期价值。
 - **官方原生 / API 中转一键切换**：自动同步 Codex `config.toml` 与 `auth.json`，保留 MCP、项目路径和 trust records 等无关配置。
-- **API 站点名字**：可选填写并持久化 API 站点名字；填写后 Codex 中显示为 `API：站点名字`，留空时不写入 Provider `name`，内部会话 Provider ID 保持稳定。
+- **API 站点名字**：可选填写并持久化 API 站点名字；填写后 Codex 中显示为 `API：站点名字`，留空时自动使用 `API`，内部会话 Provider ID 保持稳定。
 - **加密认证保险箱**：完整保存官方 `auth.json` 登录信息和中转 API Key；密文使用 ChaCha20-Poly1305。Windows 主密钥由系统凭据库管理，macOS 使用应用数据目录中的 `0600` 本地密钥文件，不申请 Keychain 权限。
 - **API Key 复用**：中转 Key 与 API 地址绑定，同一地址再次切换时无需重复输入；地址变化时要求提供新的 Key。
 - **模型自动获取**：填写 API 地址和 Key 后，可调用 `GET /v1/models` 获取 OpenAI 文本 / 推理 / Codex 模型选项；同时保留不受限制的手动填写。
@@ -244,7 +244,7 @@ It supports both official native login and third-party API relay mode. Settings 
 - **Quota windows**: Monitor 5-hour and 7-day rolling quota windows.
 - **Token value estimate**: Estimate today, 7-day, lifetime, and membership-cycle value using official API pricing assumptions.
 - **Official / API relay one-click switch**: Synchronize Codex `config.toml` and `auth.json` while preserving unrelated MCP, project-path, and trust settings.
-- **API site name**: Optionally persist a relay site name. Codex writes `API：<site name>` as the provider name only when supplied, while the internal session provider ID remains stable.
+- **API site name**: Optionally persist a relay site name. Codex writes `API：<site name>` when supplied and falls back to `API` when left blank, while the internal session provider ID remains stable.
 - **Encrypted credential vault**: Preserve the complete official `auth.json` login and the relay API Key. Windows keeps the master key in the system credential store; macOS uses a local `0600` key file in the app data directory and does not request Keychain access.
 - **Endpoint-bound Key reuse**: Reuse the stored relay Key for the same endpoint without entering it again; changing the endpoint requires a new Key.
 - **Model discovery**: Call `GET /v1/models` after entering an endpoint and Key, choose from eligible OpenAI text/reasoning/Codex models, or enter any model manually.
