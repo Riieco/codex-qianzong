@@ -1,6 +1,6 @@
 [package]
 name = "codex-qianzong"
-version = "1.5.5"
+version = "1.5.6"
 description = "Cross-platform Codex quota and usage desktop dashboard"
 authors = ["qianzong"]
 edition = "2021"
