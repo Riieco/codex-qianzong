@@ -7,23 +7,23 @@
 <!-- release-verification:start -->
 ## 最新发布校验 / Latest Release Verification
 
-当前版本 / Current version: `v1.5.6`
+当前版本 / Current version: `v1.5.7`
 
 | 文件 / File | SHA-256 |
 | --- | --- |
-| `codex-qianzong_1.5.6_x64.msi` | `3155e28b0a7f5288df22c40913cc25468ff1e7633baf7bc37762f41f92b522e7` |
-| `codex-qianzong_1.5.6_aarch64.dmg` | `70f55944666d3b44a1a7cd9fe62c145a7b1b4b83bbf905345582ed6de5d8b72c` |
-| `codex-qianzong_1.5.6_x86_64.dmg` | `f8545b1d46a8e75b3f5f73ece285eb04f68d91067b5669cbd6e530c32b946820` |
+| `codex-qianzong_1.5.7_x64.msi` | `72bd9be5b9295f10ff93f127533cbeb85f2a1df5ce53e62f715990c8b6959d6b` |
+| `codex-qianzong_1.5.7_aarch64.dmg` | `905d356510126fe924e9b0ea87da90030e7fe566cb13fb1de5a3c5cd8cb57b29` |
+| `codex-qianzong_1.5.7_x86_64.dmg` | `fbf31afe4c6e046a14cfd88c47dcee14f8ea962e1ed58ca9a8baa3a994583b90` |
 
 附注：
 
-- Apple Silicon 请下载 `codex-qianzong_1.5.6_aarch64.dmg`
-- Mac Intel 请下载 `codex-qianzong_1.5.6_x86_64.dmg`
+- Apple Silicon 请下载 `codex-qianzong_1.5.7_aarch64.dmg`
+- Mac Intel 请下载 `codex-qianzong_1.5.7_x86_64.dmg`
 
 Notes:
 
-- Apple Silicon: download `codex-qianzong_1.5.6_aarch64.dmg`
-- Mac Intel: download `codex-qianzong_1.5.6_x86_64.dmg`
+- Apple Silicon: download `codex-qianzong_1.5.7_aarch64.dmg`
+- Mac Intel: download `codex-qianzong_1.5.7_x86_64.dmg`
 <!-- release-verification:end -->
 
 ## 中文
