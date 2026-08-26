@@ -729,6 +729,7 @@ fn apply_relay_config(doc: &mut DocumentMut, settings: &AppSettings) -> AppResul
         relay.insert("name", value(display_name));
     }
     relay.insert("base_url", value(endpoint));
+    relay.insert("requires_openai_auth", value(true));
     relay.insert("wire_api", value("responses"));
     Ok(())
 }
@@ -1004,6 +1005,7 @@ preferred_auth_method = "chatgpt"
         assert!(text.contains(r#"[model_providers.qianzong_unified]"#));
         assert!(text.contains(r#"name = "API：示例站""#));
         assert!(text.contains(r#"base_url = "https://api.example.com/v1""#));
+        assert!(text.contains(r#"requires_openai_auth = true"#));
         assert!(text.contains(r#"wire_api = "responses""#));
 
         let restore = fs::read_to_string(&restore_path).unwrap();
@@ -1026,6 +1028,7 @@ preferred_auth_method = "chatgpt"
 [model_providers.qianzong_relay]
 name = "API：旧站点"
 base_url = "https://old.example.com/v1"
+requires_openai_auth = false
 wire_api = "responses"
 "#,
         )
@@ -1045,6 +1048,10 @@ wire_api = "responses"
         assert_eq!(
             provider.get("base_url").and_then(Item::as_str),
             Some("https://api.example.com/v1")
+        );
+        assert_eq!(
+            provider.get("requires_openai_auth").and_then(Item::as_bool),
+            Some(true)
         );
     }
 

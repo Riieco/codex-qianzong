@@ -16,6 +16,10 @@
 
 - Entries include concrete changed behavior and avoid transient command logs.
 
+## 2026-08-26
+
+- API 中转 Provider 现在始终写入 `requires_openai_auth = true`，并在再次保存时把旧配置中的 `false` 修复为 `true`，兼容新版 Codex 从 `auth.json` 读取 API Key 的要求，避免 `API_KEY_REQUIRED` / `401 Unauthorized`。
+
 ## 2026-07-03
 
 - Settings drawer no longer shows the old explanatory subtitle `接入方式、路径、刷新频率、主题与任务看板行为`.

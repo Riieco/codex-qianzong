@@ -68,6 +68,7 @@ Notes:
 - `model_provider = "qianzong_relay"`
 - `[model_providers.qianzong_relay]`
 - `base_url`
+- `requires_openai_auth = true`
 - `wire_api = "responses"`
 - `preferred_auth_method = "apikey"`
 - 模型、推理强度、速度策略
@@ -76,6 +77,8 @@ Notes:
 切换到中转前，应用会把完整的官方 `auth.json` 保存到加密认证保险箱。切回官方原生模式时，会移除千总中转 provider 并恢复此前的完整官方登录状态，包括 access token、refresh token、ID token 和应用尚不认识的字段。
 
 如果设备上从未登录过官方账号，切回官方模式也不会被中转认证卡住：应用会把 `model_provider` 恢复为 `openai`，并把 `auth.json` 写为 `{}`，此时可直接通过 Codex 完成新的官方登录。中转地址、模型、推理强度和速度偏好会保留，方便下次切换。
+
+新版 Codex 要求自定义 Provider 使用 `auth.json` 中的 API Key 时显式设置 `requires_openai_auth = true`。应用保存 API 中转配置时会自动写入该参数，并把旧配置中的 `false` 修复为 `true`，避免 `API_KEY_REQUIRED` 或 `401 Unauthorized`。
 
 ### 模型列表
 
@@ -270,6 +273,7 @@ When saved, the app synchronizes:
 - `model_provider = "qianzong_relay"`
 - `[model_providers.qianzong_relay]`
 - `base_url`
+- `requires_openai_auth = true`
 - `wire_api = "responses"`
 - `preferred_auth_method = "apikey"`
 - model, reasoning effort, and speed strategy
@@ -278,6 +282,8 @@ When saved, the app synchronizes:
 Before entering relay mode, the app saves the complete official `auth.json` in its encrypted credential vault. Switching back removes the managed relay provider and restores the complete previous official login, including access, refresh, and ID tokens plus fields the app does not yet recognize.
 
 If the device has never had an official login, switching back still succeeds: `model_provider` is restored to `openai` and `auth.json` becomes `{}`, allowing Codex to start a normal official login. Relay endpoint, model, reasoning, and speed preferences remain available for the next switch.
+
+Recent Codex versions require custom providers to set `requires_openai_auth = true` before they can use an API Key from `auth.json`. Saving relay settings now writes this field and repairs an existing `false` value, preventing `API_KEY_REQUIRED` and `401 Unauthorized` errors.
 
 ### Model discovery
 
